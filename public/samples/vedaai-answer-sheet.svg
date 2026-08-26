@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1130" role="img" aria-labelledby="title desc">
+  <title id="title">Demo student's handwritten science answer sheet</title>
+  <desc id="desc">A ruled answer sheet containing four handwritten answers about photosynthesis.</desc>
+  <defs>
+    <pattern id="rules" width="800" height="42" patternUnits="userSpaceOnUse">
+      <rect width="800" height="42" fill="#fffdf7"/>
+      <path d="M0 41.5H800" stroke="#bcd8e8" stroke-width="1"/>
+    </pattern>
+    <filter id="paperShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="7" stdDeviation="8" flood-color="#000" flood-opacity=".12"/>
+    </filter>
+    <style>
+      .printed{font-family:Arial,sans-serif;fill:#53616a}.hand{font-family:"Bradley Hand","Comic Sans MS",cursive;fill:#245087}.answer{font-size:22px}.small{font-size:15px}.label{font-size:17px;font-weight:700}.question{font-size:24px;font-weight:700}.sketch{fill:none;stroke:#245087;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}.callout{font-size:15px}
+    </style>
+  </defs>
+  <rect x="16" y="12" width="768" height="1106" rx="3" fill="url(#rules)" filter="url(#paperShadow)"/>
+  <path d="M74 12V1118" stroke="#e7a6a1" stroke-width="1.5"/>
+  <g class="printed">
+    <text x="102" y="56" class="small">DELHI PUBLIC SCHOOL · SCIENCE ASSESSMENT</text>
+    <text x="102" y="91" class="label">Name: Aarav Sharma</text>
+    <text x="565" y="91" class="label">Roll No. 18</text>
+    <path d="M102 103H737" stroke="#768791" stroke-width="1"/>
+  </g>
+  <g class="hand">
+    <text x="95" y="150" class="question">Q1.</text>
+    <text x="146" y="150" class="answer" transform="rotate(-.3 146 150)">Photosynthesis is how green plants prepare food using</text>
+    <text x="105" y="189" class="answer" transform="rotate(.2 105 189)">sunlight, carbon dioxide and water, and release oxygen.</text>
+    <text x="128" y="231" class="answer" transform="rotate(-.4 128 231)">6CO₂ + 6H₂O</text>
+    <path d="M279 220h116m-12-8 12 8-12 8" class="sketch"/>
+    <text x="412" y="231" class="answer">C₆H₁₂O₆ + 6O₂</text>
+    <text x="290" y="206" class="callout">sunlight + chlorophyll</text>
+
+    <text x="95" y="300" class="question">Q2.</text>
+    <text x="146" y="300" class="answer" transform="rotate(.15 146 300)">Plants look green because chlorophyll absorbs light</text>
+    <text x="105" y="340" class="answer" transform="rotate(-.25 105 340)">and reflects the green colour back to our eyes.</text>
+
+    <text x="95" y="408" class="question">Q3.</text>
+    <text x="146" y="408" class="answer">A chloroplast contains stacks of thylakoids (grana)</text>
+    <text x="105" y="449" class="answer">inside the fluid stroma.</text>
+    <g transform="translate(190 485) rotate(-2)">
+      <ellipse cx="170" cy="110" rx="160" ry="86" class="sketch"/>
+      <ellipse cx="170" cy="110" rx="151" ry="77" class="sketch"/>
+      <g class="sketch">
+        <ellipse cx="86" cy="84" rx="28" ry="10"/><ellipse cx="86" cy="94" rx="28" ry="10"/><ellipse cx="86" cy="104" rx="28" ry="10"/>
+        <ellipse cx="180" cy="126" rx="28" ry="10"/><ellipse cx="180" cy="136" rx="28" ry="10"/><ellipse cx="180" cy="146" rx="28" ry="10"/>
+        <ellipse cx="252" cy="76" rx="28" ry="10"/><ellipse cx="252" cy="86" rx="28" ry="10"/><ellipse cx="252" cy="96" rx="28" ry="10"/>
+        <path d="M112 93c32-14 74-15 112-5M113 110c24 9 42 16 43 24"/>
+        <path d="M57 71 6 43M269 65l65-31M286 131l57 17"/>
+      </g>
+      <text x="-44" y="39" class="callout">granum</text>
+      <text x="340" y="31" class="callout">stroma</text>
+      <text x="348" y="154" class="callout">double membrane</text>
+    </g>
+    <text x="105" y="706" class="answer" transform="rotate(.15 105 706)">The two stages are the light reaction and Calvin cycle.</text>
+
+    <text x="95" y="790" class="question">Q4.</text>
+    <text x="146" y="790" class="answer" transform="rotate(-.2 146 790)">Stomata are tiny pores on leaves. They let carbon</text>
+    <text x="105" y="832" class="answer">dioxide enter and oxygen leave during photosynthesis.</text>
+    <text x="105" y="874" class="answer" transform="rotate(.25 105 874)">Guard cells open and close each pore.</text>
+    <path d="M111 902c70 21 172 22 249 0" class="sketch"/>
+    <text x="373" y="909" class="callout">← gas exchange</text>
+  </g>
+  <text x="698" y="1082" class="printed small">Page 1</text>
+</svg>

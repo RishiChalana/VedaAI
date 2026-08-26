@@ -1,5 +1,7 @@
 'use client';
 
+/* eslint-disable @next/next/no-img-element -- previews use temporary object URLs that next/image cannot optimize */
+
 import {
   ChangeEvent,
   DragEvent,
@@ -8,11 +10,25 @@ import {
   useRef,
   useState,
 } from 'react';
+import {
+  extractQuestionsFromPdf,
+  type ExtractionResult,
+} from '../lib/document-extraction';
+import {
+  type AnswerRegion,
+  type AssessmentMappingResponse,
+} from '../lib/assessment-mapping';
 
 type UploadKind = 'question' | 'answer';
 type Screen = 'upload' | 'extracting' | 'results';
 type MobileTab = 'questions' | 'answer';
 type HeaderPanel = 'help' | 'notifications' | 'profile' | null;
+type ExtractionMeta = {
+  pageCount: number;
+  characterCount: number;
+  mode: ExtractionResult['mode'] | 'ai' | 'demo';
+  message: string;
+};
 
 type UploadedFile = {
   name: string;
@@ -21,17 +37,20 @@ type UploadedFile = {
   mime: string;
   source: 'uploaded' | 'demo';
   url?: string;
+  rawFile?: File;
 };
 
 type Question = {
   id: number;
+  label?: string;
   text: string;
   max: number;
   score: number;
   feedback: string;
+  mapping?: AnswerRegion;
 };
 
-const REVIEW_STORAGE_KEY = 'vedaai-assessment-review-v1';
+const REVIEW_STORAGE_KEY = 'vedaai-assessment-review-v3';
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 const navItems = [
@@ -56,6 +75,24 @@ const initialQuestions: Question[] = [
   { id: 11, text: 'State two functions of the ozone layer and one cause of its depletion.', max: 3, score: 3, feedback: 'All requested points are present and correct.' },
   { id: 12, text: 'Differentiate biodegradable and non-biodegradable waste with examples.', max: 4, score: 4, feedback: 'Complete comparison supported by suitable examples.' },
 ];
+
+const sampleQuestions: Question[] = [
+  { id: 1, label: '1', text: 'Define photosynthesis and write its balanced chemical equation.', max: 3, score: 3, feedback: 'Complete definition and a correct balanced equation.', mapping: { page: 1, x: 8, y: 10, width: 86, height: 12, confidence: 0.99, status: 'mapped', answerText: 'Photosynthesis is how green plants prepare food using sunlight, carbon dioxide and water, and release oxygen. 6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂.' } },
+  { id: 2, label: '2', text: 'Why do plants appear green?', max: 2, score: 1.5, feedback: 'Correct reflection explanation; naming the other absorbed wavelengths would make it complete.', mapping: { page: 1, x: 8, y: 24, width: 86, height: 10, confidence: 0.98, status: 'mapped', answerText: 'Plants look green because chlorophyll absorbs light and reflects the green colour back to our eyes.' } },
+  { id: 3, label: '3', text: 'Draw and label a chloroplast. Name the two main stages of photosynthesis.', max: 4, score: 4, feedback: 'Clear labelled diagram with both stages correctly named.', mapping: { page: 1, x: 8, y: 35, width: 86, height: 30, confidence: 0.99, status: 'mapped', answerText: 'A chloroplast contains stacks of thylakoids (grana) inside the fluid stroma. The two stages are the light reaction and Calvin cycle.' } },
+  { id: 4, label: '4', text: 'Explain how stomata help a plant during photosynthesis.', max: 3, score: 3, feedback: 'Accurately explains gas exchange and the role of guard cells.', mapping: { page: 1, x: 8, y: 68, width: 86, height: 14, confidence: 0.98, status: 'mapped', answerText: 'Stomata let carbon dioxide enter and oxygen leave. Guard cells open and close each pore.' } },
+];
+
+function createVerificationQuestions(pageCount: number): Question[] {
+  const count = Math.min(Math.max(pageCount, 4), 12);
+  return Array.from({ length: count }, (_, index) => ({
+    id: index + 1,
+    text: `Question ${index + 1} · verify text against the uploaded paper`,
+    max: 1,
+    score: 0,
+    feedback: 'Automatic text extraction was unavailable. Verify this question and its mapped answer before grading.',
+  }));
+}
 
 const answerText: Record<number, string[]> = {
   1: ['Natural selection is the process in which organisms with useful variations survive and reproduce.', 'Over generations, favourable traits become common and this causes evolution.'],
@@ -168,7 +205,7 @@ function UploadCard({ kind, file, onChoose, onRemove, onPreview }: { kind: Uploa
           <span className={`pdf-icon ${file.mime.startsWith('image/') ? 'image-icon' : ''}`}>{file.mime.startsWith('image/') ? 'IMG' : 'PDF'}</span>
           <button className="file-copy" onClick={onPreview} aria-label={`Preview ${file.name}`}><strong>{file.name}</strong><small>{file.size} · {file.pages} {file.pages === 1 ? 'page' : 'pages'} · Preview</small></button>
           <button className="file-remove" onClick={onRemove} aria-label={`Remove ${label}`}>×</button>
-          {file.source === 'uploaded' && <span className="upload-ready">✓ Ready</span>}
+          {file.url && <span className="upload-ready">✓ {file.source === 'demo' ? 'Sample' : 'Ready'}</span>}
         </div>
       ) : (
         <>
@@ -219,16 +256,20 @@ function Score({ score, max }: { score: number; max: number }) {
 
 function QuestionCard({ question, selected, expanded, onSelect, onViewAnswer, onUpdate, onSave }: { question: Question; selected: boolean; expanded: boolean; onSelect: () => void; onViewAnswer: () => void; onUpdate: (patch: Partial<Question>) => void; onSave: () => void }) {
   const changeScore = (delta: number) => onUpdate({ score: Math.min(question.max, Math.max(0, Math.round((question.score + delta) * 2) / 2)) });
+  const mappingLabel = question.mapping?.status === 'mapped'
+    ? `${Math.round(question.mapping.confidence * 100)}% match`
+    : question.mapping?.status === 'not_answered' ? 'Not answered' : 'Check mapping';
 
   return (
     <article className={`question-card ${selected ? 'question-card--selected' : ''}`}>
       <button className="question-summary" onClick={onSelect} aria-expanded={expanded}>
-        <span className="question-number">{question.id}</span><span className="question-text">{question.text}</span><Score score={question.score} max={question.max} /><span className="chevron">⌄</span>
+        <span className="question-number">{question.label ?? question.id}</span><span className="question-text">{question.text}</span>{question.mapping && <span className={`mapping-confidence mapping-confidence--${question.mapping.status}`}>{mappingLabel}</span>}<Score score={question.score} max={question.max} /><span className="chevron">⌄</span>
       </button>
       {expanded && (
         <div className="feedback">
           <span className="feedback-label">✦ AI Feedback · editable by teacher</span>
           <textarea aria-label={`Feedback for question ${question.id}`} value={question.feedback} onChange={(event) => onUpdate({ feedback: event.target.value })} />
+          {question.mapping?.answerText && <details className="answer-transcript"><summary>Matched answer transcript</summary><p>{question.mapping.answerText}</p></details>}
           <div className="grading-row">
             <span>Marks awarded</span>
             <div className="mark-stepper"><button onClick={() => changeScore(-0.5)} disabled={question.score === 0} aria-label={`Decrease marks for question ${question.id}`}>−</button><output>{question.score} / {question.max}</output><button onClick={() => changeScore(0.5)} disabled={question.score === question.max} aria-label={`Increase marks for question ${question.id}`}>+</button></div>
@@ -240,14 +281,14 @@ function QuestionCard({ question, selected, expanded, onSelect, onViewAnswer, on
   );
 }
 
-function QuestionsPanel({ questions, selected, expandedAll, savedAt, onExpandAll, onSelect, onViewAnswer, onUpdate, onSave, onComplete }: { questions: Question[]; selected: number; expandedAll: boolean; savedAt: string | null; onExpandAll: () => void; onSelect: (id: number) => void; onViewAnswer: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
+function QuestionsPanel({ questions, extractionMeta, selected, expandedAll, savedAt, onExpandAll, onSelect, onViewAnswer, onUpdate, onSave, onComplete }: { questions: Question[]; extractionMeta: ExtractionMeta; selected: number; expandedAll: boolean; savedAt: string | null; onExpandAll: () => void; onSelect: (id: number) => void; onViewAnswer: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
   const awarded = questions.reduce((total, question) => total + question.score, 0);
   const maximum = questions.reduce((total, question) => total + question.max, 0);
 
   return (
     <section className="questions-panel" aria-label="Extracted questions">
       <div className="panel-heading">
-        <div><h1>Extracted Questions <span>(from question paper)</span></h1><p>{questions.length} questions · {awarded}/{maximum} marks {savedAt ? `· Saved ${savedAt}` : '· Unsaved review'}</p></div>
+        <div><h1>Extracted Questions <span>(from question paper)</span></h1><p>{questions.length} questions · {awarded}/{maximum} marks {savedAt ? `· Saved ${savedAt}` : '· Unsaved review'}</p><small className={`extraction-source extraction-source--${extractionMeta.mode}`}><i>✦</i>{extractionMeta.message}</small></div>
         <div className="panel-actions"><button onClick={onExpandAll}>{expandedAll ? 'Collapse All' : 'Expand All'}</button><button className="save-review" onClick={onSave}>Save Review</button><button className="complete-review" onClick={onComplete}>Complete</button></div>
       </div>
       <div className="question-list">
@@ -269,21 +310,89 @@ function SamplePaper({ selected, page, zoom, questions }: { selected: number; pa
   );
 }
 
-function UploadedDocument({ file, selected, page, zoom }: { file: UploadedFile; selected: number; page: number; zoom: number }) {
-  const row = (selected - 1) % 3;
-  const isMappedPage = Math.ceil(selected / 3) === page;
-  const source = file.url ? `${file.url}${file.mime === 'application/pdf' ? `#page=${page}&zoom=${zoom}` : ''}` : '';
+function PdfPageCanvas({ file, page, zoom, fallbackUrl }: { file: File; page: number; zoom: number; fallbackUrl: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [failed, setFailed] = useState(false);
+  const [rendering, setRendering] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    let loadingTask: { destroy: () => Promise<void> } | undefined;
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) {
+        setFailed(true);
+        void loadingTask?.destroy();
+      }
+    }, 8000);
+
+    const renderPage = async () => {
+      try {
+        setRendering(true);
+        setFailed(false);
+        const pdfjs = await import('pdfjs-dist');
+        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+        const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+        loadingTask = task;
+        const document = await task.promise;
+        const pdfPage = await document.getPage(Math.min(page, document.numPages));
+        const viewport = pdfPage.getViewport({ scale: 1.45 });
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext('2d');
+        if (!canvas || !context || cancelled) return;
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        await pdfPage.render({ canvas, canvasContext: context, viewport }).promise;
+        pdfPage.cleanup();
+        await document.destroy();
+        if (!cancelled) setRendering(false);
+      } catch {
+        if (!cancelled) setFailed(true);
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    };
+
+    void renderPage();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      void loadingTask?.destroy();
+    };
+  }, [file, page, zoom]);
+
+  if (failed) return <object data={`${fallbackUrl}#page=${page}&zoom=${zoom}`} type="application/pdf" aria-label={`Uploaded PDF answer sheet, page ${page}`}><p>Your browser cannot preview this PDF.</p></object>;
+  return <div className="pdf-canvas-shell">{rendering && <span>Rendering page {page}…</span>}<canvas ref={canvasRef} aria-label={`Uploaded PDF answer sheet, page ${page}`} /></div>;
+}
+
+function UploadedDocument({ file, question, page, zoom }: { file: UploadedFile; question: Question; page: number; zoom: number }) {
+  const mapping = question.mapping;
+  const isMappedPage = Boolean(mapping && mapping.status !== 'not_answered' && mapping.page === page && mapping.width > 0 && mapping.height > 0);
+  const source = file.url ?? '';
+  const pageRendered = file.mime.startsWith('image/') || Boolean(file.rawFile && file.mime === 'application/pdf');
+  const highlightStyle = mapping ? {
+    left: `${mapping.x}%`,
+    right: 'auto',
+    top: `${mapping.y}%`,
+    width: `${mapping.width}%`,
+    height: `${mapping.height}%`,
+  } : undefined;
   return (
-    <div className="uploaded-document" style={file.mime.startsWith('image/') ? { transform: `scale(${zoom / 100})` } : undefined}>
-      {file.mime.startsWith('image/') ? <img src={source} alt={`Uploaded answer sheet: ${file.name}`} /> : <object key={source} data={source} type="application/pdf" aria-label={`Uploaded answer sheet: ${file.name}`}><p>Your browser cannot preview this PDF.</p></object>}
-      {isMappedPage && <div className="document-highlight" style={{ top: `${18 + row * 27}%` }}><span>Q{selected} · AI mapped region</span></div>}
+    <div className={`uploaded-document ${pageRendered ? 'uploaded-document--page' : ''}`} style={pageRendered ? { transform: `scale(${zoom / 100})` } : undefined}>
+      {file.mime.startsWith('image/')
+        ? <img src={source} alt={`Uploaded answer sheet: ${file.name}`} />
+        : file.rawFile
+          ? <PdfPageCanvas file={file.rawFile} page={page} zoom={zoom} fallbackUrl={source} />
+          : <object key={source} data={`${source}#page=${page}&zoom=${zoom}`} type="application/pdf" aria-label={`Uploaded answer sheet: ${file.name}`}><p>Your browser cannot preview this PDF.</p></object>}
+      {isMappedPage && <div className={`document-highlight ${mapping?.status === 'uncertain' ? 'document-highlight--uncertain' : ''}`} style={highlightStyle}><span>Q{question.label ?? question.id} · {Math.round((mapping?.confidence ?? 0) * 100)}% match</span></div>}
+      {mapping?.status === 'not_answered' && <div className="unanswered-state"><span>○</span><strong>No answer detected</strong><small>Confirm against the sheet before grading.</small></div>}
     </div>
   );
 }
 
 function AnswerSheet({ answerFile, questions, selected, page, zoom, onPage, onZoom }: { answerFile: UploadedFile; questions: Question[]; selected: number; page: number; zoom: number; onPage: (page: number) => void; onZoom: (zoom: number) => void }) {
   const totalPages = Math.max(answerFile.pages, 1);
-  const isUploaded = answerFile.source === 'uploaded' && Boolean(answerFile.url);
+  const isUploaded = Boolean(answerFile.url);
+  const selectedQuestion = questions.find((question) => question.id === selected) ?? questions[0];
 
   return (
     <section className="answer-panel" aria-label="Answer sheet">
@@ -294,12 +403,12 @@ function AnswerSheet({ answerFile, questions, selected, page, zoom, onPage, onZo
           <div className="page-control"><button onClick={() => onPage(Math.max(1, page - 1))} disabled={page === 1} aria-label="Previous page">‹</button><span>Page {page} of {totalPages}</span><button onClick={() => onPage(Math.min(totalPages, page + 1))} disabled={page === totalPages} aria-label="Next page">›</button></div>
         </div>
       </div>
-      <div className={`paper-viewport ${isUploaded ? 'paper-viewport--uploaded' : ''}`}>{isUploaded ? <UploadedDocument file={answerFile} selected={selected} page={page} zoom={zoom} /> : <SamplePaper selected={selected} page={page} zoom={zoom} questions={questions} />}</div>
+      <div className={`paper-viewport ${isUploaded ? 'paper-viewport--uploaded' : ''}`}>{isUploaded && selectedQuestion ? <UploadedDocument file={answerFile} question={selectedQuestion} page={page} zoom={zoom} /> : <SamplePaper selected={selected} page={page} zoom={zoom} questions={questions} />}</div>
     </section>
   );
 }
 
-function ResultsScreen({ answerFile, questions, selected, savedAt, onSelected, onUpdate, onSave, onComplete }: { answerFile: UploadedFile; questions: Question[]; selected: number; savedAt: string | null; onSelected: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
+function ResultsScreen({ answerFile, questions, extractionMeta, selected, savedAt, onSelected, onUpdate, onSave, onComplete }: { answerFile: UploadedFile; questions: Question[]; extractionMeta: ExtractionMeta; selected: number; savedAt: string | null; onSelected: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
   const [tab, setTab] = useState<MobileTab>('questions');
   const [expandedAll, setExpandedAll] = useState(false);
   const [zoom, setZoom] = useState(100);
@@ -307,13 +416,19 @@ function ResultsScreen({ answerFile, questions, selected, savedAt, onSelected, o
 
   const selectQuestion = (id: number) => {
     onSelected(id);
-    setPage(Math.min(answerFile.pages, Math.ceil(id / 3)));
+    const question = questions.find((item) => item.id === id);
+    if (question?.mapping) {
+      setPage(Math.min(answerFile.pages, question.mapping.page));
+    } else {
+      const questionsPerPage = Math.max(1, Math.ceil(questions.length / answerFile.pages));
+      setPage(Math.min(answerFile.pages, Math.ceil(id / questionsPerPage)));
+    }
   };
 
   return (
     <div className="results-workspace">
       <div className="mobile-tabs" role="tablist"><button role="tab" aria-selected={tab === 'questions'} className={tab === 'questions' ? 'active' : ''} onClick={() => setTab('questions')}>Questions</button><button role="tab" aria-selected={tab === 'answer'} className={tab === 'answer' ? 'active' : ''} onClick={() => setTab('answer')}>Answer Sheet</button></div>
-      <div className={`result-column result-column--questions ${tab === 'questions' ? 'mobile-active' : ''}`}><QuestionsPanel questions={questions} selected={selected} expandedAll={expandedAll} savedAt={savedAt} onExpandAll={() => setExpandedAll(!expandedAll)} onSelect={selectQuestion} onViewAnswer={(id) => { selectQuestion(id); setTab('answer'); }} onUpdate={onUpdate} onSave={onSave} onComplete={onComplete} /></div>
+      <div className={`result-column result-column--questions ${tab === 'questions' ? 'mobile-active' : ''}`}><QuestionsPanel questions={questions} extractionMeta={extractionMeta} selected={selected} expandedAll={expandedAll} savedAt={savedAt} onExpandAll={() => setExpandedAll(!expandedAll)} onSelect={selectQuestion} onViewAnswer={(id) => { selectQuestion(id); setTab('answer'); }} onUpdate={onUpdate} onSave={onSave} onComplete={onComplete} /></div>
       <div className={`result-column result-column--answer ${tab === 'answer' ? 'mobile-active' : ''}`}><AnswerSheet answerFile={answerFile} questions={questions} selected={selected} page={page} zoom={zoom} onPage={setPage} onZoom={setZoom} /></div>
       <button className="mobile-view-fab" onClick={() => setTab(tab === 'questions' ? 'answer' : 'questions')}>{tab === 'questions' ? 'View highlighted answer →' : '← Back to questions'}</button>
     </div>
@@ -354,13 +469,24 @@ async function inspectFile(file: File): Promise<UploadedFile> {
 
   let pages = 1;
   if (mime === 'application/pdf') {
-    const buffer = await file.arrayBuffer();
-    const text = new TextDecoder('latin1').decode(buffer);
-    const detected = text.match(/\/Type\s*\/Page\b/g)?.length ?? 0;
-    pages = Math.max(1, Math.min(detected || 1, 99));
+    // Keep uploads responsive even when the browser cannot start PDF.js workers.
+    // This lightweight count is corrected by the full extraction result later.
+    const source = new TextDecoder('latin1').decode(await file.arrayBuffer());
+    pages = Math.max(1, Math.min(source.match(/\/Type\s*\/Page\b/g)?.length ?? 1, 99));
   }
 
-  return { name: file.name, size: `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)} MB`, pages, mime, source: 'uploaded', url: URL.createObjectURL(file) };
+  return { name: file.name, size: `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)} MB`, pages, mime, source: 'uploaded', url: URL.createObjectURL(file), rawFile: file };
+}
+
+async function mapAssessmentWithAi(questionPaper: File, answerSheet: File): Promise<AssessmentMappingResponse> {
+  const formData = new FormData();
+  formData.append('questionPaper', questionPaper);
+  formData.append('answerSheet', answerSheet);
+
+  const response = await fetch('/api/map-assessment', { method: 'POST', body: formData });
+  const payload = await response.json() as AssessmentMappingResponse & { error?: string };
+  if (!response.ok) throw new Error(payload.error || 'AI mapping could not be completed.');
+  return payload;
 }
 
 export default function Home() {
@@ -375,22 +501,30 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null);
   const [showComplete, setShowComplete] = useState(false);
+  const [extractionMeta, setExtractionMeta] = useState<ExtractionMeta>({ pageCount: 4, characterCount: 0, mode: 'demo', message: 'VedaAI sample assessment · mapped for demonstration' });
+  const mappingRun = useRef(0);
 
   const awardedMarks = useMemo(() => questions.reduce((sum, question) => sum + question.score, 0), [questions]);
+  const maximumMarks = useMemo(() => questions.reduce((sum, question) => sum + question.max, 0), [questions]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setShowIntro(false), 1250);
-    const saved = window.localStorage.getItem(REVIEW_STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as { questions?: Question[]; savedAt?: string };
-        if (Array.isArray(parsed.questions) && parsed.questions.length === initialQuestions.length) setQuestions(parsed.questions);
-        if (parsed.savedAt) setSavedAt(parsed.savedAt);
-      } catch {
-        window.localStorage.removeItem(REVIEW_STORAGE_KEY);
+    const hydrateReview = window.setTimeout(() => {
+      const saved = window.localStorage.getItem(REVIEW_STORAGE_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as { questions?: Question[]; savedAt?: string };
+          if (Array.isArray(parsed.questions) && parsed.questions.length > 0) setQuestions(parsed.questions);
+          if (parsed.savedAt) setSavedAt(parsed.savedAt);
+        } catch {
+          window.localStorage.removeItem(REVIEW_STORAGE_KEY);
+        }
       }
-    }
-    return () => window.clearTimeout(timer);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(hydrateReview);
+    };
   }, []);
 
   useEffect(() => {
@@ -401,11 +535,8 @@ export default function Home() {
 
   useEffect(() => {
     if (screen !== 'extracting') return;
-    setProgress(8);
-    const ticks: Array<[number, number]> = [[450, 28], [1050, 51], [1700, 74], [2300, 91], [2850, 100]];
-    const timers = ticks.map(([delay, value]) => window.setTimeout(() => setProgress(value), delay));
-    timers.push(window.setTimeout(() => setScreen('results'), 3300));
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
+    const timer = window.setInterval(() => setProgress((current) => Math.min(92, current + 9)), 420);
+    return () => window.clearInterval(timer);
   }, [screen]);
 
   const chooseFile = async (kind: UploadKind, file: File) => {
@@ -427,10 +558,87 @@ export default function Home() {
     setNotice(`${kind === 'question' ? 'Question paper' : 'Answer sheet'} removed.`);
   };
 
-  const loadDemo = () => {
-    setQuestionFile({ name: 'Class_10_Science.pdf', size: '1.8 MB', pages: 4, mime: 'application/pdf', source: 'demo' });
-    setAnswerFile({ name: 'Madhur_Answer_Sheet.pdf', size: '2.4 MB', pages: 4, mime: 'application/pdf', source: 'demo' });
-    setNotice('Sample assessment loaded. Start mapping when ready.');
+  const loadDemo = async () => {
+    try {
+      setNotice('Loading the VedaAI sample assessment...');
+      const [questionResponse, answerResponse] = await Promise.all([
+        fetch('/samples/vedaai-question-paper.pdf'),
+        fetch('/samples/vedaai-answer-sheet.svg'),
+      ]);
+      if (!questionResponse.ok || !answerResponse.ok) throw new Error('Sample document request failed.');
+      const [questionBlob, answerBlob] = await Promise.all([questionResponse.blob(), answerResponse.blob()]);
+      const [sampleQuestion, sampleAnswer] = await Promise.all([
+        inspectFile(new File([questionBlob], 'VedaAI_Science_Question_Paper.pdf', { type: 'application/pdf' })),
+        inspectFile(new File([answerBlob], 'VedaAI_Demo_Answer_Sheet.svg', { type: 'image/svg+xml' })),
+      ]);
+      setQuestionFile({ ...sampleQuestion, source: 'demo' });
+      setAnswerFile({ ...sampleAnswer, source: 'demo' });
+      setNotice('Sample question paper and answer sheet loaded. Start mapping when ready.');
+    } catch {
+      setNotice('The sample documents could not be loaded. Please upload your own files.');
+    }
+  };
+
+  const beginMapping = async () => {
+    if (!questionFile || !answerFile) return;
+    const runId = ++mappingRun.current;
+    const startedAt = Date.now();
+    setProgress(8);
+    setScreen('extracting');
+    setSavedAt(null);
+
+    let nextQuestions = questions;
+    let nextMeta: ExtractionMeta = { pageCount: questionFile.pages, characterCount: 0, mode: 'demo', message: 'VedaAI sample assessment · mapped for demonstration' };
+
+    if (questionFile.source === 'demo') {
+      nextQuestions = sampleQuestions;
+      nextMeta = { pageCount: questionFile.pages, characterCount: 333, mode: 'ai', message: `${sampleQuestions.length} questions and answers matched · average confidence 99%.` };
+    } else if (questionFile.rawFile && answerFile.rawFile) {
+      try {
+        const result = await mapAssessmentWithAi(questionFile.rawFile, answerFile.rawFile);
+        nextQuestions = result.questions;
+        const mappedCount = result.questions.filter((question) => question.mapping.status === 'mapped').length;
+        const averageConfidence = result.questions.reduce((sum, question) => sum + question.mapping.confidence, 0) / result.questions.length;
+        nextMeta = {
+          pageCount: questionFile.pages,
+          characterCount: result.questions.reduce((sum, question) => sum + question.mapping.answerText.length, 0),
+          mode: 'ai',
+          message: `${mappedCount}/${result.questions.length} answers matched by AI · ${Math.round(averageConfidence * 100)}% average confidence.`,
+        };
+        setAnswerFile((current) => current ? { ...current, pages: result.answerPageCount } : current);
+      } catch (aiError) {
+        const reason = aiError instanceof Error ? aiError.message : 'AI mapping was unavailable.';
+        if (questionFile.mime === 'application/pdf') {
+          try {
+            const result = await Promise.race([
+              extractQuestionsFromPdf(questionFile.rawFile),
+              new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('PDF extraction timed out.')), 6500)),
+            ]);
+            const { questions: extracted, ...meta } = result;
+            nextMeta = { ...meta, mode: 'fallback', message: `${reason} Questions were extracted locally, but answer matches need verification.` };
+            nextQuestions = extracted.length >= 2 ? extracted : createVerificationQuestions(meta.pageCount);
+          } catch {
+            nextQuestions = createVerificationQuestions(questionFile.pages);
+            nextMeta = { pageCount: questionFile.pages, characterCount: 0, mode: 'fallback', message: `${reason} Verify the question placeholders before grading.` };
+          }
+        } else {
+          nextQuestions = createVerificationQuestions(questionFile.pages);
+          nextMeta = { pageCount: questionFile.pages, characterCount: 0, mode: 'fallback', message: `${reason} Image questions and answer matches need verification.` };
+        }
+      }
+    }
+
+    const remainingDelay = Math.max(450, 2600 - (Date.now() - startedAt));
+    window.setTimeout(() => {
+      if (mappingRun.current !== runId) return;
+      setQuestions(nextQuestions);
+      setSelected(nextQuestions.find((question) => question.mapping?.status === 'mapped')?.id ?? nextQuestions[0]?.id ?? 1);
+      setExtractionMeta(nextMeta);
+      setProgress(100);
+      window.setTimeout(() => {
+        if (mappingRun.current === runId) setScreen('results');
+      }, 380);
+    }, remainingDelay);
   };
 
   const saveReview = (message = 'Review saved on this device.') => {
@@ -441,12 +649,13 @@ export default function Home() {
   };
 
   const completeReview = () => {
-    saveReview(`Review completed · ${awardedMarks}/40 marks awarded.`);
+    saveReview(`Review completed · ${awardedMarks}/${maximumMarks} marks awarded.`);
     setShowComplete(false);
   };
 
   const goBack = () => {
     if (screen === 'upload') { setNotice('You are at the beginning of the assessment flow.'); return; }
+    mappingRun.current += 1;
     setScreen('upload');
     setProgress(0);
   };
@@ -458,9 +667,9 @@ export default function Home() {
         <Sidebar compact={screen !== 'upload'} onNotice={setNotice} />
         <div className="app-main">
           <Header screen={screen} onBack={goBack} onNotice={setNotice} />
-          {screen === 'upload' && <UploadScreen questionFile={questionFile} answerFile={answerFile} chooseFile={chooseFile} removeFile={removeFile} startMapping={() => questionFile && answerFile && setScreen('extracting')} loadDemo={loadDemo} previewFile={setPreviewFile} />}
+          {screen === 'upload' && <UploadScreen questionFile={questionFile} answerFile={answerFile} chooseFile={chooseFile} removeFile={removeFile} startMapping={beginMapping} loadDemo={loadDemo} previewFile={setPreviewFile} />}
           {screen === 'extracting' && questionFile && answerFile && <ExtractingScreen progress={progress} questionFile={questionFile} answerFile={answerFile} />}
-          {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}
+          {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} extractionMeta={extractionMeta} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}
         </div>
       </main>
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
