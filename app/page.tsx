@@ -18,9 +18,10 @@ import {
   type AnswerRegion,
   type AssessmentMappingResponse,
 } from '../lib/assessment-mapping';
+import { saveReviewToDatabase, loadReviewFromDatabase } from './actions';
 
 type UploadKind = 'question' | 'answer';
-type Screen = 'upload' | 'extracting' | 'results';
+type Screen = 'upload' | 'extracting' | 'results' | 'dashboard' | 'classroom' | 'settings';
 type MobileTab = 'questions' | 'answer';
 type HeaderPanel = 'help' | 'notifications' | 'profile' | null;
 type ExtractionMeta = {
@@ -118,18 +119,20 @@ function VedaMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Header({ screen, onBack, onNotice }: { screen: Screen; onBack: () => void; onNotice: (message: string) => void }) {
+function Header({ screen, onBack, onNotice, onNavigate }: { screen: Screen; onBack: () => void; onNotice: (message: string) => void; onNavigate: (label: string) => void }) {
   const [panel, setPanel] = useState<HeaderPanel>(null);
   const [mobileMenu, setMobileMenu] = useState(false);
 
   const togglePanel = (next: HeaderPanel) => setPanel(panel === next ? null : next);
+  const isBackVisible = screen === 'results' || screen === 'extracting';
+  const title = screen === 'results' ? 'Assessment review' : screen === 'dashboard' ? 'Dashboard' : screen === 'classroom' ? 'Classroom' : 'Exams';
 
   return (
     <>
       <header className="topbar">
         <div className="topbar-left">
-          <button className="icon-button back-button" aria-label="Go back" onClick={onBack}>←</button>
-          <span className="page-crumb">{screen === 'results' ? 'Assessment review' : 'Exams'}</span>
+          {isBackVisible && <button className="icon-button back-button" aria-label="Go back" onClick={onBack}>←</button>}
+          <span className="page-crumb">{title}</span>
         </div>
         <div className="mobile-brand"><VedaMark /></div>
         <div className="topbar-actions">
@@ -156,26 +159,92 @@ function Header({ screen, onBack, onNotice }: { screen: Screen; onBack: () => vo
 
       {mobileMenu && (
         <div className="mobile-menu" role="dialog" aria-label="Mobile navigation">
-          {navItems.map(([icon, label]) => <button key={label} className={label === 'Exams' ? 'active' : ''} onClick={() => { setMobileMenu(false); onNotice(label === 'Exams' ? 'You are already in Exams.' : `${label} is outside this assignment flow.`); }}><span>{icon}</span>{label}</button>)}
+          {navItems.map(([icon, label]) => <button key={label} className={label === 'Exams' ? 'active' : ''} onClick={() => { setMobileMenu(false); onNavigate(label); }}><span>{icon}</span>{label}</button>)}
         </div>
       )}
     </>
   );
 }
 
-function Sidebar({ compact, onNotice }: { compact: boolean; onNotice: (message: string) => void }) {
+function Sidebar({ compact, onNotice, onNavigate, currentScreen }: { compact: boolean; onNotice: (message: string) => void; onNavigate: (label: string) => void; currentScreen: Screen }) {
   return (
     <aside className={`sidebar ${compact ? 'sidebar--compact' : ''}`}>
       <VedaMark compact={compact} />
       <button className="toolkit-button" aria-label="AI Teacher's Toolkit" onClick={() => onNotice('Assessment Mapper is part of the AI Teacher’s Toolkit.')}><span>✦</span><b>AI Teacher&apos;s Toolkit</b></button>
       <nav aria-label="Primary navigation">
-        {navItems.map(([icon, label]) => <button key={label} className={label === 'Exams' ? 'active' : ''} title={label} onClick={() => onNotice(label === 'Exams' ? 'You are already in Exams.' : `${label} is outside this assignment flow.`)}><span className="nav-icon">{icon}</span><b>{label}</b></button>)}
+        {navItems.map(([icon, label]) => {
+          const isActive = (label === 'Home' && currentScreen === 'dashboard') || 
+                           (label === 'My Classroom' && currentScreen === 'classroom') || 
+                           (label === 'Exams' && (currentScreen === 'upload' || currentScreen === 'extracting' || currentScreen === 'results'));
+          return <button key={label} className={isActive ? 'active' : ''} title={label} onClick={() => onNavigate(label)}><span className="nav-icon">{icon}</span><b>{label}</b></button>;
+        })}
       </nav>
       <div className="sidebar-footer">
-        <button className="settings" title="Settings" onClick={() => onNotice('Settings are outside this assignment flow.')}><span>⚙</span><b>Settings</b></button>
+        <button className={currentScreen === 'settings' ? 'settings active' : 'settings'} title="Settings" onClick={() => onNavigate('Settings')}><span>⚙</span><b>Settings</b></button>
         <button className="school-card" title="Delhi Public School, Bokaro Steel City" onClick={() => onNotice('Delhi Public School · Bokaro Steel City')}><span className="school-seal">D</span><span className="school-copy"><strong>Delhi Public School</strong><small>Bokaro Steel City</small></span></button>
       </div>
     </aside>
+  );
+}
+
+function DashboardScreen({ onNavigate }: { onNavigate: (label: string) => void }) {
+  return (
+    <section className="upload-workspace">
+      <div className="title-block"><h1>Welcome back, <span>Madhur</span></h1><p>Here is an overview of your classroom</p></div>
+      <div style={{ display: 'flex', gap: '20px', marginTop: '40px', justifyContent: 'center' }}>
+        <div className="school-card" style={{ padding: '20px', width: '200px', flexDirection: 'column', alignItems: 'center' }}>
+          <h2>3</h2><p>Pending Reviews</p>
+          <button onClick={() => onNavigate('Exams')} style={{ marginTop: '10px', background: 'var(--orange)', color: 'white', padding: '5px 15px', borderRadius: '20px', border: 'none', cursor: 'pointer' }}>Grade Now</button>
+        </div>
+        <div className="school-card" style={{ padding: '20px', width: '200px', flexDirection: 'column', alignItems: 'center' }}>
+          <h2>42</h2><p>Total Students</p>
+          <button onClick={() => onNavigate('My Classroom')} style={{ marginTop: '10px', background: 'var(--canvas)', color: 'black', padding: '5px 15px', borderRadius: '20px', border: '1px solid var(--line)', cursor: 'pointer' }}>View Roster</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ClassroomScreen() {
+  return (
+    <section className="upload-workspace">
+      <div className="title-block"><h1>My <span>Classroom</span></h1><p>10th Grade Computer Science</p></div>
+      <table style={{ margin: '40px auto', width: '80%', textAlign: 'left', borderCollapse: 'collapse' }}>
+        <thead><tr style={{ borderBottom: '2px solid var(--line)' }}><th>Roll No</th><th>Name</th><th>Latest Exam</th><th>Average</th></tr></thead>
+        <tbody>
+          <tr style={{ borderBottom: '1px solid var(--line)' }}><td style={{ padding: '10px 0' }}>12</td><td>Aarav Sharma</td><td>95%</td><td>92%</td></tr>
+          <tr style={{ borderBottom: '1px solid var(--line)' }}><td style={{ padding: '10px 0' }}>13</td><td>Diya Patel</td><td>88%</td><td>89%</td></tr>
+          <tr style={{ borderBottom: '1px solid var(--line)' }}><td style={{ padding: '10px 0' }}>14</td><td>Kabir Singh</td><td>Pending</td><td>76%</td></tr>
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function SettingsScreen() {
+  return (
+    <section className="upload-workspace">
+      <div className="title-block"><h1>Account <span>Settings</span></h1><p>Manage your preferences</p></div>
+      <div style={{ margin: '40px auto', width: '300px', textAlign: 'left' }}>
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Name</label>
+          <input type="text" defaultValue="Madhur Khang" style={{ width: '100%', padding: '10px', borderRadius: '5px', border: '1px solid var(--line)' }} />
+        </div>
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>School</label>
+          <input type="text" defaultValue="Delhi Public School" style={{ width: '100%', padding: '10px', borderRadius: '5px', border: '1px solid var(--line)' }} />
+        </div>
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Dark Mode</label>
+          <select style={{ width: '100%', padding: '10px', borderRadius: '5px', border: '1px solid var(--line)' }}>
+            <option>System Default</option>
+            <option>Light</option>
+            <option>Dark</option>
+          </select>
+        </div>
+        <button style={{ background: 'var(--orange)', color: 'white', padding: '10px 20px', borderRadius: '20px', border: 'none', cursor: 'pointer', width: '100%' }}>Save Settings</button>
+      </div>
+    </section>
   );
 }
 
@@ -289,7 +358,7 @@ function QuestionsPanel({ questions, extractionMeta, selected, expandedAll, save
     <section className="questions-panel" aria-label="Extracted questions">
       <div className="panel-heading">
         <div><h1>Extracted Questions <span>(from question paper)</span></h1><p>{questions.length} questions · {awarded}/{maximum} marks {savedAt ? `· Saved ${savedAt}` : '· Unsaved review'}</p><small className={`extraction-source extraction-source--${extractionMeta.mode}`}><i>✦</i>{extractionMeta.message}</small></div>
-        <div className="panel-actions"><button onClick={onExpandAll}>{expandedAll ? 'Collapse All' : 'Expand All'}</button><button className="save-review" onClick={onSave}>Save Review</button><button className="complete-review" onClick={onComplete}>Complete</button></div>
+        <div className="panel-actions"><button onClick={onExpandAll}>{expandedAll ? 'Collapse All' : 'Expand All'}</button><button className="save-review" onClick={onSave}>Save Review</button><button className="save-review" style={{background: 'var(--ink)'}} onClick={() => window.print()}>Export PDF</button><button className="complete-review" onClick={onComplete}>Complete</button></div>
       </div>
       <div className="question-list">
         {questions.map((question) => <QuestionCard key={question.id} question={question} selected={question.id === selected} expanded={expandedAll || question.id === selected} onSelect={() => onSelect(question.id)} onViewAnswer={() => onViewAnswer(question.id)} onUpdate={(patch) => onUpdate(question.id, patch)} onSave={onSave} />)}
@@ -490,7 +559,7 @@ async function mapAssessmentWithAi(questionPaper: File, answerSheet: File): Prom
 }
 
 export default function Home() {
-  const [screen, setScreen] = useState<Screen>('upload');
+  const [screen, setScreen] = useState<Screen>('dashboard');
   const [questionFile, setQuestionFile] = useState<UploadedFile | null>(null);
   const [answerFile, setAnswerFile] = useState<UploadedFile | null>(null);
   const [progress, setProgress] = useState(0);
@@ -509,21 +578,24 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => setShowIntro(false), 1250);
-    const hydrateReview = window.setTimeout(() => {
-      const saved = window.localStorage.getItem(REVIEW_STORAGE_KEY);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as { questions?: Question[]; savedAt?: string };
-          if (Array.isArray(parsed.questions) && parsed.questions.length > 0) setQuestions(parsed.questions);
-          if (parsed.savedAt) setSavedAt(parsed.savedAt);
-        } catch {
-          window.localStorage.removeItem(REVIEW_STORAGE_KEY);
+    
+    // Load review from Database
+    const hydrateFromDb = async () => {
+      try {
+        const parsed = await loadReviewFromDatabase();
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setQuestions(parsed);
+          const time = new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(new Date());
+          setSavedAt(time);
         }
+      } catch (err) {
+        console.error('Failed to load review', err);
       }
-    }, 0);
+    };
+    hydrateFromDb();
+
     return () => {
       window.clearTimeout(timer);
-      window.clearTimeout(hydrateReview);
     };
   }, []);
 
@@ -641,11 +713,16 @@ export default function Home() {
     }, remainingDelay);
   };
 
-  const saveReview = (message = 'Review saved on this device.') => {
+  const saveReview = async (message = 'Review saved securely.') => {
     const time = new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(new Date());
-    window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify({ questions, savedAt: time }));
     setSavedAt(time);
-    setNotice(message);
+    
+    try {
+      await saveReviewToDatabase(questions);
+      setNotice(message);
+    } catch (err) {
+      setNotice('Failed to save review to server.');
+    }
   };
 
   const completeReview = () => {
@@ -660,13 +737,24 @@ export default function Home() {
     setProgress(0);
   };
 
+  const navigate = (label: string) => {
+    if (label === 'Home') setScreen('dashboard');
+    else if (label === 'My Classroom') setScreen('classroom');
+    else if (label === 'Exams') setScreen('upload');
+    else if (label === 'Settings') setScreen('settings');
+    else setNotice(`${label} is outside this assignment flow.`);
+  };
+
   return (
     <>
       {showIntro && <Intro />}
       <main className={`app-shell app-shell--${screen}`}>
-        <Sidebar compact={screen !== 'upload'} onNotice={setNotice} />
+        <Sidebar compact={screen !== 'upload' && screen !== 'dashboard' && screen !== 'classroom'} onNotice={setNotice} onNavigate={navigate} currentScreen={screen} />
         <div className="app-main">
-          <Header screen={screen} onBack={goBack} onNotice={setNotice} />
+          <Header screen={screen} onBack={goBack} onNotice={setNotice} onNavigate={navigate} />
+          {screen === 'dashboard' && <DashboardScreen onNavigate={navigate} />}
+          {screen === 'classroom' && <ClassroomScreen />}
+          {screen === 'settings' && <SettingsScreen />}
           {screen === 'upload' && <UploadScreen questionFile={questionFile} answerFile={answerFile} chooseFile={chooseFile} removeFile={removeFile} startMapping={beginMapping} loadDemo={loadDemo} previewFile={setPreviewFile} />}
           {screen === 'extracting' && questionFile && answerFile && <ExtractingScreen progress={progress} questionFile={questionFile} answerFile={answerFile} />}
           {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} extractionMeta={extractionMeta} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}

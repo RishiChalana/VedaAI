@@ -1,0 +1,110 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// NextAuth Required Models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  school        String?   // Teacher's school
+  accounts      Account[]
+  sessions      Session[]
+  classrooms    Classroom[]
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// VedaAI Models
+
+model Classroom {
+  id        String   @id @default(cuid())
+  name      String
+  teacherId String
+  createdAt DateTime @default(now())
+
+  teacher     User         @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  students    Student[]
+  assessments Assessment[]
+}
+
+model Student {
+  id          String   @id @default(cuid())
+  name        String
+  rollNo      String
+  classroomId String
+  createdAt   DateTime @default(now())
+
+  classroom   Classroom    @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+}
+
+model Assessment {
+  id               String   @id @default(cuid())
+  title            String
+  subject          String
+  maxMarks         Float?
+  questionPaperUrl String?
+  classroomId      String
+  createdAt        DateTime @default(now())
+
+  classroom   Classroom    @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+}
+
+model Submission {
+  id             String   @id @default(cuid())
+  studentId      String
+  assessmentId   String
+  answerSheetUrl String?
+  score          Float?
+  status         String   @default("PENDING") // PENDING, REVIEWING, COMPLETED
+  mappingData    String?  // JSON stringified data of the AI mapping
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+}

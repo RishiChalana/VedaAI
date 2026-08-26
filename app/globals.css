@@ -337,3 +337,4 @@ body { background:var(--canvas); color:var(--ink); font-family:Arial,Helvetica,s
   .mapping-button { margin-top:18px; }
 }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; } }
+@media print { .sidebar, .topbar, .review-actions { display: none !important; } .app-shell, .app-main, .results-panel { background: white !important; } * { color: black !important; } .results-panel { padding: 0 !important; } }
