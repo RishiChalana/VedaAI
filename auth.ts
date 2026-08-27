@@ -2,11 +2,20 @@ import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { PrismaClient } from "@prisma/client";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import Database from "better-sqlite3";
+import path from "path";
 
 // Ensure a single Prisma client in development
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
-export const prisma = globalForPrisma.prisma || new PrismaClient();
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+let prismaClient = globalForPrisma.prisma;
+if (!prismaClient) {
+  const adapter = new PrismaBetterSqlite3({ url: "file:./dev.db" });
+  prismaClient = new PrismaClient({ adapter });
+  if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prismaClient;
+}
+export const prisma = prismaClient;
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma),

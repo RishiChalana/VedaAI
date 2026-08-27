@@ -92,6 +92,27 @@ export function normalizeAssessmentMapping(result: ApiAssessmentMapping, model: 
   };
 }
 
+export const questionExtractionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['questions'],
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['question_number', 'question_text', 'max_marks'],
+        properties: {
+          question_number: { type: 'string' },
+          question_text: { type: 'string' },
+          max_marks: { type: 'number' },
+        }
+      }
+    }
+  }
+};
+
 export const assessmentMappingSchema = {
   type: 'object',
   additionalProperties: false,

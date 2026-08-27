@@ -153,7 +153,7 @@ function Header({ screen, onBack, onNotice, onNavigate }: { screen: Screen; onBa
           <button className="popover-close" aria-label="Close" onClick={() => setPanel(null)}>×</button>
           {panel === 'help' && <><span className="popover-icon">✦</span><strong>Assessment mapping help</strong><p>Upload one question paper and one answer sheet. VedaAI maps each answer for teacher review.</p></>}
           {panel === 'notifications' && <><span className="popover-icon">✓</span><strong>You&apos;re all caught up</strong><p>Your assessment workspace has no new notifications.</p></>}
-          {panel === 'profile' && <><span className="popover-icon popover-avatar">MR</span><strong>Madhur Khang</strong><p>Teacher · Delhi Public School</p><button className="popover-action" onClick={() => { setPanel(null); onNotice('Profile settings are outside this assignment flow.'); }}>View profile</button></>}
+          {panel === 'profile' && <><span className="popover-icon popover-avatar">MR</span><strong>Madhur Khang</strong><p>Teacher · Delhi Public School</p><button className="popover-action" onClick={() => { setPanel(null); onNavigate('Settings'); }}>View profile</button></>}
         </div>
       )}
 
@@ -191,14 +191,20 @@ function DashboardScreen({ onNavigate }: { onNavigate: (label: string) => void }
   return (
     <section className="upload-workspace">
       <div className="title-block"><h1>Welcome back, <span>Madhur</span></h1><p>Here is an overview of your classroom</p></div>
-      <div style={{ display: 'flex', gap: '20px', marginTop: '40px', justifyContent: 'center' }}>
-        <div className="school-card" style={{ padding: '20px', width: '200px', flexDirection: 'column', alignItems: 'center' }}>
-          <h2>3</h2><p>Pending Reviews</p>
-          <button onClick={() => onNavigate('Exams')} style={{ marginTop: '10px', background: 'var(--orange)', color: 'white', padding: '5px 15px', borderRadius: '20px', border: 'none', cursor: 'pointer' }}>Grade Now</button>
+      <div className="dashboard-grid">
+        <div className="stat-card">
+          <div>
+            <div className="stat-card-header"><span>Pending Reviews</span><span style={{ fontSize: '20px' }}>📄</span></div>
+            <p className="stat-card-value">3</p>
+          </div>
+          <button className="stat-card-action btn-primary" onClick={() => onNavigate('Exams')}><span>Grade Now</span> <span>→</span></button>
         </div>
-        <div className="school-card" style={{ padding: '20px', width: '200px', flexDirection: 'column', alignItems: 'center' }}>
-          <h2>42</h2><p>Total Students</p>
-          <button onClick={() => onNavigate('My Classroom')} style={{ marginTop: '10px', background: 'var(--canvas)', color: 'black', padding: '5px 15px', borderRadius: '20px', border: '1px solid var(--line)', cursor: 'pointer' }}>View Roster</button>
+        <div className="stat-card">
+          <div>
+            <div className="stat-card-header"><span>Total Students</span><span style={{ fontSize: '20px' }}>🎓</span></div>
+            <p className="stat-card-value">42</p>
+          </div>
+          <button className="stat-card-action btn-secondary" onClick={() => onNavigate('My Classroom')}>View Roster</button>
         </div>
       </div>
     </section>
@@ -209,40 +215,46 @@ function ClassroomScreen() {
   return (
     <section className="upload-workspace">
       <div className="title-block"><h1>My <span>Classroom</span></h1><p>10th Grade Computer Science</p></div>
-      <table style={{ margin: '40px auto', width: '80%', textAlign: 'left', borderCollapse: 'collapse' }}>
-        <thead><tr style={{ borderBottom: '2px solid var(--line)' }}><th>Roll No</th><th>Name</th><th>Latest Exam</th><th>Average</th></tr></thead>
-        <tbody>
-          <tr style={{ borderBottom: '1px solid var(--line)' }}><td style={{ padding: '10px 0' }}>12</td><td>Aarav Sharma</td><td>95%</td><td>92%</td></tr>
-          <tr style={{ borderBottom: '1px solid var(--line)' }}><td style={{ padding: '10px 0' }}>13</td><td>Diya Patel</td><td>88%</td><td>89%</td></tr>
-          <tr style={{ borderBottom: '1px solid var(--line)' }}><td style={{ padding: '10px 0' }}>14</td><td>Kabir Singh</td><td>Pending</td><td>76%</td></tr>
-        </tbody>
-      </table>
+      <div className="classroom-container">
+        <div className="roster-table-wrapper">
+          <table className="roster-table">
+            <thead><tr><th>Roll No</th><th>Name</th><th>Latest Exam</th><th>Average</th></tr></thead>
+            <tbody>
+              <tr><td>12</td><td>Aarav Sharma</td><td><span className="status-badge status-success">95%</span></td><td>92%</td></tr>
+              <tr><td>13</td><td>Diya Patel</td><td><span className="status-badge status-success">88%</span></td><td>89%</td></tr>
+              <tr><td>14</td><td>Kabir Singh</td><td><span className="status-badge status-warning">Pending</span></td><td>76%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   );
 }
 
-function SettingsScreen() {
+function SettingsScreen({ onNotice }: { onNotice: (msg: string) => void }) {
   return (
     <section className="upload-workspace">
       <div className="title-block"><h1>Account <span>Settings</span></h1><p>Manage your preferences</p></div>
-      <div style={{ margin: '40px auto', width: '300px', textAlign: 'left' }}>
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Name</label>
-          <input type="text" defaultValue="Madhur Khang" style={{ width: '100%', padding: '10px', borderRadius: '5px', border: '1px solid var(--line)' }} />
-        </div>
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>School</label>
-          <input type="text" defaultValue="Delhi Public School" style={{ width: '100%', padding: '10px', borderRadius: '5px', border: '1px solid var(--line)' }} />
-        </div>
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Dark Mode</label>
-          <select style={{ width: '100%', padding: '10px', borderRadius: '5px', border: '1px solid var(--line)' }}>
-            <option>System Default</option>
-            <option>Light</option>
-            <option>Dark</option>
-          </select>
-        </div>
-        <button style={{ background: 'var(--orange)', color: 'white', padding: '10px 20px', borderRadius: '20px', border: 'none', cursor: 'pointer', width: '100%' }}>Save Settings</button>
+      <div className="settings-container">
+        <form className="settings-form" onSubmit={(e) => { e.preventDefault(); onNotice('Settings saved successfully.'); }}>
+          <div className="form-group">
+            <label>Full Name</label>
+            <input type="text" className="form-input" defaultValue="Madhur Khang" />
+          </div>
+          <div className="form-group">
+            <label>School Name</label>
+            <input type="text" className="form-input" defaultValue="Delhi Public School" />
+          </div>
+          <div className="form-group">
+            <label>Theme Preference</label>
+            <select className="form-input form-select">
+              <option>System Default</option>
+              <option>Light Theme</option>
+              <option>Dark Theme (Coming Soon)</option>
+            </select>
+          </div>
+          <button type="submit" className="stat-card-action btn-primary" style={{ marginTop: '30px' }}>Save Settings</button>
+        </form>
       </div>
     </section>
   );
@@ -754,7 +766,7 @@ export default function Home() {
           <Header screen={screen} onBack={goBack} onNotice={setNotice} onNavigate={navigate} />
           {screen === 'dashboard' && <DashboardScreen onNavigate={navigate} />}
           {screen === 'classroom' && <ClassroomScreen />}
-          {screen === 'settings' && <SettingsScreen />}
+          {screen === 'settings' && <SettingsScreen onNotice={setNotice} />}
           {screen === 'upload' && <UploadScreen questionFile={questionFile} answerFile={answerFile} chooseFile={chooseFile} removeFile={removeFile} startMapping={beginMapping} loadDemo={loadDemo} previewFile={setPreviewFile} />}
           {screen === 'extracting' && questionFile && answerFile && <ExtractingScreen progress={progress} questionFile={questionFile} answerFile={answerFile} />}
           {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} extractionMeta={extractionMeta} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}

@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
+    "@prisma/adapter-better-sqlite3": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "better-sqlite3": "^13.0.3",
     "next": "16.2.6",
     "next-auth": "^5.0.0-beta.32",
     "pdfjs-dist": "^6.2.108",
