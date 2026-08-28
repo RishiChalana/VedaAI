@@ -5,6 +5,8 @@
 import {
   ChangeEvent,
   DragEvent,
+  type CSSProperties,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -17,6 +19,8 @@ import {
 import {
   type AnswerRegion,
   type AssessmentMappingResponse,
+  type MappingStatus,
+  type UnmatchedAnswer,
 } from '../lib/assessment-mapping';
 
 type UploadKind = 'question' | 'answer';
@@ -47,8 +51,14 @@ type Question = {
   max: number;
   score: number;
   feedback: string;
-  mapping?: AnswerRegion;
+  status?: MappingStatus;
+  confidence?: number;
+  answerText?: string;
+  regions?: AnswerRegion[];
 };
+
+// A single rectangle to draw over the rendered answer-sheet page.
+type Highlight = AnswerRegion & { label: string; variant: 'mapped' | 'uncertain' | 'unmatched' };
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
@@ -76,10 +86,10 @@ const initialQuestions: Question[] = [
 ];
 
 const sampleQuestions: Question[] = [
-  { id: 1, label: '1', text: 'Define photosynthesis and write its balanced chemical equation.', max: 3, score: 3, feedback: 'Complete definition and a correct balanced equation.', mapping: { page: 1, x: 8, y: 10, width: 86, height: 12, confidence: 0.99, status: 'mapped', answerText: 'Photosynthesis is how green plants prepare food using sunlight, carbon dioxide and water, and release oxygen. 6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂.' } },
-  { id: 2, label: '2', text: 'Why do plants appear green?', max: 2, score: 1.5, feedback: 'Correct reflection explanation; naming the other absorbed wavelengths would make it complete.', mapping: { page: 1, x: 8, y: 24, width: 86, height: 10, confidence: 0.98, status: 'mapped', answerText: 'Plants look green because chlorophyll absorbs light and reflects the green colour back to our eyes.' } },
-  { id: 3, label: '3', text: 'Draw and label a chloroplast. Name the two main stages of photosynthesis.', max: 4, score: 4, feedback: 'Clear labelled diagram with both stages correctly named.', mapping: { page: 1, x: 8, y: 35, width: 86, height: 30, confidence: 0.99, status: 'mapped', answerText: 'A chloroplast contains stacks of thylakoids (grana) inside the fluid stroma. The two stages are the light reaction and Calvin cycle.' } },
-  { id: 4, label: '4', text: 'Explain how stomata help a plant during photosynthesis.', max: 3, score: 3, feedback: 'Accurately explains gas exchange and the role of guard cells.', mapping: { page: 1, x: 8, y: 68, width: 86, height: 14, confidence: 0.98, status: 'mapped', answerText: 'Stomata let carbon dioxide enter and oxygen leave. Guard cells open and close each pore.' } },
+  { id: 1, label: '1', text: 'Define photosynthesis and write its balanced chemical equation.', max: 3, score: 3, feedback: 'Complete definition and a correct balanced equation.', status: 'mapped', confidence: 0.99, answerText: 'Photosynthesis is how green plants prepare food using sunlight, carbon dioxide and water, and release oxygen. 6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂.', regions: [{ page: 1, left: 8, top: 10, width: 86, height: 12 }] },
+  { id: 2, label: '2', text: 'Why do plants appear green?', max: 2, score: 1.5, feedback: 'Correct reflection explanation; naming the other absorbed wavelengths would make it complete.', status: 'mapped', confidence: 0.98, answerText: 'Plants look green because chlorophyll absorbs light and reflects the green colour back to our eyes.', regions: [{ page: 1, left: 8, top: 24, width: 86, height: 10 }] },
+  { id: 3, label: '3', text: 'Draw and label a chloroplast. Name the two main stages of photosynthesis.', max: 4, score: 4, feedback: 'Clear labelled diagram with both stages correctly named.', status: 'mapped', confidence: 0.99, answerText: 'A chloroplast contains stacks of thylakoids (grana) inside the fluid stroma. The two stages are the light reaction and Calvin cycle.', regions: [{ page: 1, left: 8, top: 35, width: 86, height: 30 }] },
+  { id: 4, label: '4', text: 'Explain how stomata help a plant during photosynthesis.', max: 3, score: 3, feedback: 'Accurately explains gas exchange and the role of guard cells.', status: 'mapped', confidence: 0.98, answerText: 'Stomata let carbon dioxide enter and oxygen leave. Guard cells open and close each pore.', regions: [{ page: 1, left: 8, top: 68, width: 86, height: 14 }] },
 ];
 
 function createVerificationQuestions(pageCount: number): Question[] {
@@ -260,20 +270,20 @@ function Score({ score, max }: { score: number; max: number }) {
 
 function QuestionCard({ question, selected, expanded, onSelect, onViewAnswer, onUpdate, onSave }: { question: Question; selected: boolean; expanded: boolean; onSelect: () => void; onViewAnswer: () => void; onUpdate: (patch: Partial<Question>) => void; onSave: () => void }) {
   const changeScore = (delta: number) => onUpdate({ score: Math.min(question.max, Math.max(0, Math.round((question.score + delta) * 2) / 2)) });
-  const mappingLabel = question.mapping?.status === 'mapped'
-    ? `${Math.round(question.mapping.confidence * 100)}% match`
-    : question.mapping?.status === 'not_answered' ? 'Not answered' : 'Check mapping';
+  const mappingLabel = question.status === 'mapped'
+    ? `${Math.round((question.confidence ?? 0) * 100)}% match`
+    : question.status === 'not_answered' ? 'Not answered' : 'Check mapping';
 
   return (
     <article className={`question-card ${selected ? 'question-card--selected' : ''}`}>
       <button className="question-summary" onClick={onSelect} aria-expanded={expanded}>
-        <span className="question-number">{question.label ?? question.id}</span><span className="question-text">{question.text}</span>{question.mapping && <span className={`mapping-confidence mapping-confidence--${question.mapping.status}`}>{mappingLabel}</span>}<Score score={question.score} max={question.max} /><span className="chevron">⌄</span>
+        <span className="question-number">{question.label ?? question.id}</span><span className="question-text">{question.text}</span>{question.status && <span className={`mapping-confidence mapping-confidence--${question.status}`}>{mappingLabel}</span>}<Score score={question.score} max={question.max} /><span className="chevron">⌄</span>
       </button>
       {expanded && (
         <div className="feedback">
           <span className="feedback-label">✦ AI Feedback · editable by teacher</span>
           <textarea aria-label={`Feedback for question ${question.id}`} value={question.feedback} onChange={(event) => onUpdate({ feedback: event.target.value })} />
-          {question.mapping?.answerText && <details className="answer-transcript"><summary>Matched answer transcript</summary><p>{question.mapping.answerText}</p></details>}
+          {question.answerText && <details className="answer-transcript"><summary>Matched answer transcript</summary><p>{question.answerText}</p></details>}
           <div className="grading-row">
             <span>Marks awarded</span>
             <div className="mark-stepper"><button onClick={() => changeScore(-0.5)} disabled={question.score === 0} aria-label={`Decrease marks for question ${question.id}`}>−</button><output>{question.score} / {question.max}</output><button onClick={() => changeScore(0.5)} disabled={question.score === question.max} aria-label={`Increase marks for question ${question.id}`}>+</button></div>
@@ -285,7 +295,7 @@ function QuestionCard({ question, selected, expanded, onSelect, onViewAnswer, on
   );
 }
 
-function QuestionsPanel({ questions, extractionMeta, selected, expandedAll, savedAt, onExpandAll, onSelect, onViewAnswer, onUpdate, onSave, onComplete }: { questions: Question[]; extractionMeta: ExtractionMeta; selected: number; expandedAll: boolean; savedAt: string | null; onExpandAll: () => void; onSelect: (id: number) => void; onViewAnswer: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
+function QuestionsPanel({ questions, unmatched, extractionMeta, selected, selectedUnmatched, expandedAll, savedAt, onExpandAll, onSelect, onSelectUnmatched, onViewAnswer, onUpdate, onSave, onComplete }: { questions: Question[]; unmatched: UnmatchedAnswer[]; extractionMeta: ExtractionMeta; selected: number; selectedUnmatched: number | null; expandedAll: boolean; savedAt: string | null; onExpandAll: () => void; onSelect: (id: number) => void; onSelectUnmatched: (id: number) => void; onViewAnswer: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
   const awarded = questions.reduce((total, question) => total + question.score, 0);
   const maximum = questions.reduce((total, question) => total + question.max, 0);
 
@@ -297,6 +307,20 @@ function QuestionsPanel({ questions, extractionMeta, selected, expandedAll, save
       </div>
       <div className="question-list">
         {questions.map((question) => <QuestionCard key={question.id} question={question} selected={question.id === selected} expanded={expandedAll || question.id === selected} onSelect={() => onSelect(question.id)} onViewAnswer={() => onViewAnswer(question.id)} onUpdate={(patch) => onUpdate(question.id, patch)} onSave={onSave} />)}
+        {unmatched.length > 0 && (
+          <div className="unmatched-panel" aria-label="Unmatched answers">
+            <div className="unmatched-heading"><strong>Unmatched answers</strong><span>{unmatched.length}</span></div>
+            <p className="unmatched-sub">Handwriting VedaAI could not tie to any extracted question. Review before grading.</p>
+            {unmatched.map((entry) => (
+              <button key={entry.id} className={`unmatched-card ${entry.id === selectedUnmatched ? 'unmatched-card--selected' : ''}`} onClick={() => onSelectUnmatched(entry.id)}>
+                <div className="unmatched-card-head"><span className="unmatched-tag">Unmatched</span><span className="unmatched-page">Page {entry.region.page}</span></div>
+                {entry.transcript && <p className="unmatched-transcript">{entry.transcript}</p>}
+                {entry.note && <small className="unmatched-note">{entry.note}</small>}
+                <span className="unmatched-view">View on sheet →</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -314,7 +338,73 @@ function SamplePaper({ selected, page, zoom, questions }: { selected: number; pa
   );
 }
 
-function PdfPageCanvas({ file, page, zoom, fallbackUrl }: { file: File; page: number; zoom: number; fallbackUrl: string }) {
+// Track the *rendered* (layout) pixel size of a media element (img/canvas) and
+// keep it current across resize. Highlight boxes are positioned from this live
+// size at render time, not from percentages baked in at fetch time — so they
+// stay aligned when the viewport or the answer-sheet column resizes. Zoom is a
+// CSS transform on an ancestor, which scales the media and its overlays together
+// (layout size is unchanged), so no per-zoom recompute is needed.
+function useMeasuredSize(ref: RefObject<HTMLElement | null>) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => setSize({ width: element.clientWidth, height: element.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
+}
+
+// Absolutely-positioned rectangles drawn over the rendered page. Positioned in
+// real pixels derived from the measured media size, so a box that the model
+// placed at (left%, top%) lands on the same spot of the actual handwriting.
+function RegionHighlights({ mediaRef, highlights }: { mediaRef: RefObject<HTMLElement | null>; highlights: Highlight[] }) {
+  const size = useMeasuredSize(mediaRef);
+  if (size.width === 0 || size.height === 0 || highlights.length === 0) return null;
+  return (
+    <>
+      {highlights.map((highlight, index) => {
+        const unmatched = highlight.variant === 'unmatched';
+        return (
+          <div
+            key={index}
+            className={`document-highlight ${highlight.variant === 'uncertain' ? 'document-highlight--uncertain' : ''}`}
+            style={{
+              left: `${(highlight.left / 100) * size.width}px`,
+              top: `${(highlight.top / 100) * size.height}px`,
+              width: `${(highlight.width / 100) * size.width}px`,
+              height: `${(highlight.height / 100) * size.height}px`,
+              right: 'auto',
+              ...(unmatched ? { borderColor: '#e0564e', borderStyle: 'dashed' as const, background: 'rgb(224 86 78 / 13%)' } : null),
+            }}
+          >
+            {highlight.label && <span style={unmatched ? { background: '#d1483f' } : undefined}>{highlight.label}</span>}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+// Wraps a media element so its overlay layer shares the exact same box. The stage
+// is a block that the media fills (width:100%, height:auto), so the stage tightly
+// wraps the media and percentage/pixel overlays map directly onto it.
+const mediaStageStyle: CSSProperties = { position: 'relative', width: '100%', lineHeight: 0 };
+
+function ImageStage({ src, name, page, highlights }: { src: string; name: string; page: number; highlights: Highlight[] }) {
+  const imageRef = useRef<HTMLImageElement>(null);
+  return (
+    <div className="media-stage" style={mediaStageStyle}>
+      <img ref={imageRef} src={src} alt={`Uploaded answer sheet: ${name}, page ${page}`} />
+      <RegionHighlights mediaRef={imageRef} highlights={highlights} />
+    </div>
+  );
+}
+
+function PdfPageCanvas({ file, page, zoom, fallbackUrl, highlights }: { file: File; page: number; zoom: number; fallbackUrl: string; highlights: Highlight[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
   const [rendering, setRendering] = useState(true);
@@ -364,36 +454,50 @@ function PdfPageCanvas({ file, page, zoom, fallbackUrl }: { file: File; page: nu
     };
   }, [file, page, zoom]);
 
+  // Native-PDF fallback can't host a pixel-accurate overlay, so highlights are
+  // omitted there (the canvas path above is the accurate one).
   if (failed) return <object data={`${fallbackUrl}#page=${page}&zoom=${zoom}`} type="application/pdf" aria-label={`Uploaded PDF answer sheet, page ${page}`}><p>Your browser cannot preview this PDF.</p></object>;
-  return <div className="pdf-canvas-shell">{rendering && <span>Rendering page {page}…</span>}<canvas ref={canvasRef} aria-label={`Uploaded PDF answer sheet, page ${page}`} /></div>;
-}
-
-function UploadedDocument({ file, question, page, zoom }: { file: UploadedFile; question: Question; page: number; zoom: number }) {
-  const mapping = question.mapping;
-  const isMappedPage = Boolean(mapping && mapping.status !== 'not_answered' && mapping.page === page && mapping.width > 0 && mapping.height > 0);
-  const source = file.url ?? '';
-  const pageRendered = file.mime.startsWith('image/') || Boolean(file.rawFile && file.mime === 'application/pdf');
-  const highlightStyle = mapping ? {
-    left: `${mapping.x}%`,
-    right: 'auto',
-    top: `${mapping.y}%`,
-    width: `${mapping.width}%`,
-    height: `${mapping.height}%`,
-  } : undefined;
   return (
-    <div className={`uploaded-document ${pageRendered ? 'uploaded-document--page' : ''}`} style={pageRendered ? { transform: `scale(${zoom / 100})` } : undefined}>
-      {file.mime.startsWith('image/')
-        ? <img src={source} alt={`Uploaded answer sheet: ${file.name}`} />
-        : file.rawFile
-          ? <PdfPageCanvas file={file.rawFile} page={page} zoom={zoom} fallbackUrl={source} />
-          : <object key={source} data={`${source}#page=${page}&zoom=${zoom}`} type="application/pdf" aria-label={`Uploaded answer sheet: ${file.name}`}><p>Your browser cannot preview this PDF.</p></object>}
-      {isMappedPage && <div className={`document-highlight ${mapping?.status === 'uncertain' ? 'document-highlight--uncertain' : ''}`} style={highlightStyle}><span>Q{question.label ?? question.id} · {Math.round((mapping?.confidence ?? 0) * 100)}% match</span></div>}
-      {mapping?.status === 'not_answered' && <div className="unanswered-state"><span>○</span><strong>No answer detected</strong><small>Confirm against the sheet before grading.</small></div>}
+    <div className="media-stage" style={mediaStageStyle}>
+      {rendering && <span className="pdf-rendering-note" style={{ position: 'absolute', top: 8, left: 8, color: '#8f8a84', fontSize: '10.5px', zIndex: 2 }}>Rendering page {page}…</span>}
+      <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: 'auto' }} aria-label={`Uploaded PDF answer sheet, page ${page}`} />
+      <RegionHighlights mediaRef={canvasRef} highlights={highlights} />
     </div>
   );
 }
 
-function AnswerSheet({ answerFile, questions, selected, page, zoom, onPage, onZoom }: { answerFile: UploadedFile; questions: Question[]; selected: number; page: number; zoom: number; onPage: (page: number) => void; onZoom: (zoom: number) => void }) {
+function UploadedDocument({ file, question, unmatched, page, zoom }: { file: UploadedFile; question: Question; unmatched: UnmatchedAnswer | null; page: number; zoom: number }) {
+  const source = file.url ?? '';
+  const pageRendered = file.mime.startsWith('image/') || Boolean(file.rawFile && file.mime === 'application/pdf');
+  const variant: Highlight['variant'] = question.status === 'uncertain' ? 'uncertain' : 'mapped';
+
+  // Highlights for the page currently shown: the selected question's region(s)
+  // on this page, plus a selected unmatched answer if it lives on this page.
+  const highlights: Highlight[] = (question.regions ?? [])
+    .filter((region) => region.page === page)
+    .map((region, index) => ({
+      ...region,
+      variant,
+      label: index === 0 ? `Q${question.label ?? question.id} · ${Math.round((question.confidence ?? 0) * 100)}% match` : '',
+    }));
+
+  if (unmatched && unmatched.region.page === page) {
+    highlights.push({ ...unmatched.region, variant: 'unmatched', label: 'Unmatched answer' });
+  }
+
+  return (
+    <div className={`uploaded-document ${pageRendered ? 'uploaded-document--page' : ''}`} style={pageRendered ? { transform: `scale(${zoom / 100})` } : undefined}>
+      {file.mime.startsWith('image/')
+        ? <ImageStage src={source} name={file.name} page={page} highlights={highlights} />
+        : file.rawFile
+          ? <PdfPageCanvas file={file.rawFile} page={page} zoom={zoom} fallbackUrl={source} highlights={highlights} />
+          : <object key={source} data={`${source}#page=${page}&zoom=${zoom}`} type="application/pdf" aria-label={`Uploaded answer sheet: ${file.name}`}><p>Your browser cannot preview this PDF.</p></object>}
+      {question.status === 'not_answered' && highlights.length === 0 && <div className="unanswered-state"><span>○</span><strong>No answer detected</strong><small>Confirm against the sheet before grading.</small></div>}
+    </div>
+  );
+}
+
+function AnswerSheet({ answerFile, questions, selected, selectedUnmatched, page, zoom, onPage, onZoom }: { answerFile: UploadedFile; questions: Question[]; selected: number; selectedUnmatched: UnmatchedAnswer | null; page: number; zoom: number; onPage: (page: number) => void; onZoom: (zoom: number) => void }) {
   const totalPages = Math.max(answerFile.pages, 1);
   const isUploaded = Boolean(answerFile.url);
   const selectedQuestion = questions.find((question) => question.id === selected) ?? questions[0];
@@ -407,33 +511,45 @@ function AnswerSheet({ answerFile, questions, selected, page, zoom, onPage, onZo
           <div className="page-control"><button onClick={() => onPage(Math.max(1, page - 1))} disabled={page === 1} aria-label="Previous page">‹</button><span>Page {page} of {totalPages}</span><button onClick={() => onPage(Math.min(totalPages, page + 1))} disabled={page === totalPages} aria-label="Next page">›</button></div>
         </div>
       </div>
-      <div className={`paper-viewport ${isUploaded ? 'paper-viewport--uploaded' : ''}`}>{isUploaded && selectedQuestion ? <UploadedDocument file={answerFile} question={selectedQuestion} page={page} zoom={zoom} /> : <SamplePaper selected={selected} page={page} zoom={zoom} questions={questions} />}</div>
+      <div className={`paper-viewport ${isUploaded ? 'paper-viewport--uploaded' : ''}`}>{isUploaded && selectedQuestion ? <UploadedDocument file={answerFile} question={selectedQuestion} unmatched={selectedUnmatched} page={page} zoom={zoom} /> : <SamplePaper selected={selected} page={page} zoom={zoom} questions={questions} />}</div>
     </section>
   );
 }
 
-function ResultsScreen({ answerFile, questions, extractionMeta, selected, savedAt, onSelected, onUpdate, onSave, onComplete }: { answerFile: UploadedFile; questions: Question[]; extractionMeta: ExtractionMeta; selected: number; savedAt: string | null; onSelected: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
+function ResultsScreen({ answerFile, questions, unmatched, extractionMeta, selected, savedAt, onSelected, onUpdate, onSave, onComplete }: { answerFile: UploadedFile; questions: Question[]; unmatched: UnmatchedAnswer[]; extractionMeta: ExtractionMeta; selected: number; savedAt: string | null; onSelected: (id: number) => void; onUpdate: (id: number, patch: Partial<Question>) => void; onSave: () => void; onComplete: () => void }) {
   const [tab, setTab] = useState<MobileTab>('questions');
   const [expandedAll, setExpandedAll] = useState(false);
   const [zoom, setZoom] = useState(100);
   const [page, setPage] = useState(1);
+  const [selectedUnmatched, setSelectedUnmatched] = useState<number | null>(null);
 
   const selectQuestion = (id: number) => {
     onSelected(id);
+    setSelectedUnmatched(null);
     const question = questions.find((item) => item.id === id);
-    if (question?.mapping) {
-      setPage(Math.min(answerFile.pages, question.mapping.page));
+    const firstRegion = question?.regions?.[0];
+    if (firstRegion) {
+      setPage(Math.min(answerFile.pages, firstRegion.page));
     } else {
       const questionsPerPage = Math.max(1, Math.ceil(questions.length / answerFile.pages));
       setPage(Math.min(answerFile.pages, Math.ceil(id / questionsPerPage)));
     }
   };
 
+  const selectUnmatched = (id: number) => {
+    setSelectedUnmatched(id);
+    const entry = unmatched.find((item) => item.id === id);
+    if (entry) setPage(Math.min(answerFile.pages, entry.region.page));
+    setTab('answer');
+  };
+
+  const activeUnmatched = unmatched.find((item) => item.id === selectedUnmatched) ?? null;
+
   return (
     <div className="results-workspace">
       <div className="mobile-tabs" role="tablist"><button role="tab" aria-selected={tab === 'questions'} className={tab === 'questions' ? 'active' : ''} onClick={() => setTab('questions')}>Questions</button><button role="tab" aria-selected={tab === 'answer'} className={tab === 'answer' ? 'active' : ''} onClick={() => setTab('answer')}>Answer Sheet</button></div>
-      <div className={`result-column result-column--questions ${tab === 'questions' ? 'mobile-active' : ''}`}><QuestionsPanel questions={questions} extractionMeta={extractionMeta} selected={selected} expandedAll={expandedAll} savedAt={savedAt} onExpandAll={() => setExpandedAll(!expandedAll)} onSelect={selectQuestion} onViewAnswer={(id) => { selectQuestion(id); setTab('answer'); }} onUpdate={onUpdate} onSave={onSave} onComplete={onComplete} /></div>
-      <div className={`result-column result-column--answer ${tab === 'answer' ? 'mobile-active' : ''}`}><AnswerSheet answerFile={answerFile} questions={questions} selected={selected} page={page} zoom={zoom} onPage={setPage} onZoom={setZoom} /></div>
+      <div className={`result-column result-column--questions ${tab === 'questions' ? 'mobile-active' : ''}`}><QuestionsPanel questions={questions} unmatched={unmatched} extractionMeta={extractionMeta} selected={selected} selectedUnmatched={selectedUnmatched} expandedAll={expandedAll} savedAt={savedAt} onExpandAll={() => setExpandedAll(!expandedAll)} onSelect={selectQuestion} onSelectUnmatched={selectUnmatched} onViewAnswer={(id) => { selectQuestion(id); setTab('answer'); }} onUpdate={onUpdate} onSave={onSave} onComplete={onComplete} /></div>
+      <div className={`result-column result-column--answer ${tab === 'answer' ? 'mobile-active' : ''}`}><AnswerSheet answerFile={answerFile} questions={questions} selected={selected} selectedUnmatched={activeUnmatched} page={page} zoom={zoom} onPage={setPage} onZoom={setZoom} /></div>
       <button className="mobile-view-fab" onClick={() => setTab(tab === 'questions' ? 'answer' : 'questions')}>{tab === 'questions' ? 'View highlighted answer →' : '← Back to questions'}</button>
     </div>
   );
@@ -505,6 +621,7 @@ export default function Home() {
   const [selected, setSelected] = useState(2);
   const [showIntro, setShowIntro] = useState(true);
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
+  const [unmatched, setUnmatched] = useState<UnmatchedAnswer[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null);
@@ -583,6 +700,7 @@ export default function Home() {
     setSavedAt(null);
 
     let nextQuestions = questions;
+    let nextUnmatched: UnmatchedAnswer[] = [];
     let nextMeta: ExtractionMeta = { pageCount: questionFile.pages, characterCount: 0, mode: 'demo', message: 'VedaAI sample assessment · mapped for demonstration' };
 
     if (questionFile.source === 'demo') {
@@ -592,13 +710,14 @@ export default function Home() {
       try {
         const result = await mapAssessmentWithAi(questionFile.rawFile, answerFile.rawFile);
         nextQuestions = result.questions;
-        const mappedCount = result.questions.filter((question) => question.mapping.status === 'mapped').length;
-        const averageConfidence = result.questions.reduce((sum, question) => sum + question.mapping.confidence, 0) / result.questions.length;
+        nextUnmatched = result.unmatchedAnswers;
+        const mappedCount = result.questions.filter((question) => question.status === 'mapped').length;
+        const averageConfidence = result.questions.reduce((sum, question) => sum + question.confidence, 0) / (result.questions.length || 1);
         nextMeta = {
           pageCount: questionFile.pages,
-          characterCount: result.questions.reduce((sum, question) => sum + question.mapping.answerText.length, 0),
+          characterCount: result.questions.reduce((sum, question) => sum + question.answerText.length, 0),
           mode: 'ai',
-          message: `${mappedCount}/${result.questions.length} answers matched by AI · ${Math.round(averageConfidence * 100)}% average confidence.`,
+          message: `${mappedCount}/${result.questions.length} answers matched by AI · ${Math.round(averageConfidence * 100)}% average confidence${result.unmatchedAnswers.length ? ` · ${result.unmatchedAnswers.length} unmatched` : ''}.`,
         };
         setAnswerFile((current) => current ? { ...current, pages: result.answerPageCount } : current);
       } catch (aiError) {
@@ -638,7 +757,8 @@ export default function Home() {
     window.setTimeout(() => {
       if (mappingRun.current !== runId) return;
       setQuestions(nextQuestions);
-      setSelected(nextQuestions.find((question) => question.mapping?.status === 'mapped')?.id ?? nextQuestions[0]?.id ?? 1);
+      setUnmatched(nextUnmatched);
+      setSelected(nextQuestions.find((question) => question.status === 'mapped')?.id ?? nextQuestions[0]?.id ?? 1);
       setExtractionMeta(nextMeta);
       setProgress(100);
       window.setTimeout(() => {
@@ -682,7 +802,7 @@ export default function Home() {
           <Header screen={screen} onBack={goBack} onNavigate={navigate} />
           {screen === 'upload' && <UploadScreen questionFile={questionFile} answerFile={answerFile} chooseFile={chooseFile} removeFile={removeFile} startMapping={beginMapping} loadDemo={loadDemo} previewFile={setPreviewFile} />}
           {screen === 'extracting' && questionFile && answerFile && <ExtractingScreen progress={progress} questionFile={questionFile} answerFile={answerFile} />}
-          {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} extractionMeta={extractionMeta} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}
+          {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} unmatched={unmatched} extractionMeta={extractionMeta} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}
         </div>
       </main>
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
