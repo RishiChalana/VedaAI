@@ -53,23 +53,25 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const questionPaper = formData.get('questionPaper');
-    const answerSheet = formData.get('answerSheet');
+    const answerSheets = formData.getAll('answerSheet');
 
-    if (!(questionPaper instanceof File) || !(answerSheet instanceof File)) {
-      return NextResponse.json({ error: 'Both a question paper and an answer sheet are required.' }, { status: 400 });
+    if (!(questionPaper instanceof File) || answerSheets.length === 0 || !answerSheets.every(f => f instanceof File)) {
+      return NextResponse.json({ error: 'Both a question paper and at least one answer sheet are required.' }, { status: 400 });
     }
-    if (!isSupported(questionPaper) || !isSupported(answerSheet)) {
+    const allFiles = [questionPaper, ...(answerSheets as File[])];
+    if (!allFiles.every(isSupported)) {
       return NextResponse.json({ error: 'Use PDF, PNG, JPG or WEBP documents.' }, { status: 415 });
     }
-    if (questionPaper.size + answerSheet.size >= MAX_COMBINED_FILE_SIZE) {
+    const totalSize = allFiles.reduce((acc, f) => acc + f.size, 0);
+    if (totalSize >= MAX_COMBINED_FILE_SIZE) {
       return NextResponse.json({ error: 'The combined documents must be smaller than 50 MB.' }, { status: 413 });
     }
 
     const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-    const [questionContent, answerContent] = await Promise.all([
-      toModelContent(questionPaper, 'QUESTION PAPER'),
-      toModelContent(answerSheet, 'STUDENT ANSWER SHEET'),
-    ]);
+    const questionContent = await toModelContent(questionPaper, 'QUESTION PAPER');
+    const answerContent = (await Promise.all(
+      (answerSheets as File[]).map((file, i) => toModelContent(file, `STUDENT ANSWER SHEET (PAGE ${i + 1})`))
+    )).flat();
 
     // PHASE 1: Extract Questions
     const extractInstruction = `You are VedaAI's assessment engine. Read the QUESTION PAPER carefully. Extract every gradable question and sub-question in source order. Preserve its original number/label and wording. Return its maximum marks; use 1 only if no marks are printed. Return only the requested JSON schema.`;
@@ -131,6 +133,10 @@ CRITICAL MAPPING INSTRUCTIONS:
 - Student answers may be COMPLETELY OUT OF ORDER. Actively scan ALL pages of the answer sheet for each question on the checklist.
 - Handwriting may be messy, cursive, or faint. Make your absolute best effort to transcribe and semantically match it to the checklist.
 - Map each answer to the correct question using explicit numbering, diagrams, and semantic meaning.
+
+STEP-BY-STEP PROCESS:
+1. First, read through the entire answer sheet. In the \`transcript\` field, write out a complete transcription of the answer sheet page by page, and add any scratchpad reasoning on where answers are located.
+2. Then, map each question from the checklist to the transcribed answers.
 
 For each question:
 - Transcribe the matched student answer concisely. Do not invent missing text.

@@ -18,10 +18,9 @@ import {
   type AnswerRegion,
   type AssessmentMappingResponse,
 } from '../lib/assessment-mapping';
-import { saveReviewToDatabase, loadReviewFromDatabase } from './actions';
 
 type UploadKind = 'question' | 'answer';
-type Screen = 'upload' | 'extracting' | 'results' | 'dashboard' | 'classroom' | 'settings';
+type Screen = 'upload' | 'extracting' | 'results';
 type MobileTab = 'questions' | 'answer';
 type HeaderPanel = 'help' | 'notifications' | 'profile' | null;
 type ExtractionMeta = {
@@ -51,7 +50,6 @@ type Question = {
   mapping?: AnswerRegion;
 };
 
-const REVIEW_STORAGE_KEY = 'vedaai-assessment-review-v3';
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 const navItems = [
@@ -119,13 +117,13 @@ function VedaMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Header({ screen, onBack, onNotice, onNavigate }: { screen: Screen; onBack: () => void; onNotice: (message: string) => void; onNavigate: (label: string) => void }) {
+function Header({ screen, onBack, onNavigate }: { screen: Screen; onBack: () => void; onNavigate: (label: string) => void }) {
   const [panel, setPanel] = useState<HeaderPanel>(null);
   const [mobileMenu, setMobileMenu] = useState(false);
 
   const togglePanel = (next: HeaderPanel) => setPanel(panel === next ? null : next);
   const isBackVisible = screen === 'results' || screen === 'extracting';
-  const title = screen === 'results' ? 'Assessment review' : screen === 'dashboard' ? 'Dashboard' : screen === 'classroom' ? 'Classroom' : 'Exams';
+  const title = screen === 'results' ? 'Assessment review' : 'Exams';
 
   return (
     <>
@@ -166,97 +164,22 @@ function Header({ screen, onBack, onNotice, onNavigate }: { screen: Screen; onBa
   );
 }
 
-function Sidebar({ compact, onNotice, onNavigate, currentScreen }: { compact: boolean; onNotice: (message: string) => void; onNavigate: (label: string) => void; currentScreen: Screen }) {
+function Sidebar({ compact, onNotice, onNavigate }: { compact: boolean; onNotice: (message: string) => void; onNavigate: (label: string) => void }) {
   return (
     <aside className={`sidebar ${compact ? 'sidebar--compact' : ''}`}>
       <VedaMark compact={compact} />
       <button className="toolkit-button" aria-label="AI Teacher's Toolkit" onClick={() => onNotice('Assessment Mapper is part of the AI Teacher’s Toolkit.')}><span>✦</span><b>AI Teacher&apos;s Toolkit</b></button>
       <nav aria-label="Primary navigation">
         {navItems.map(([icon, label]) => {
-          const isActive = (label === 'Home' && currentScreen === 'dashboard') || 
-                           (label === 'My Classroom' && currentScreen === 'classroom') || 
-                           (label === 'Exams' && (currentScreen === 'upload' || currentScreen === 'extracting' || currentScreen === 'results'));
+          const isActive = label === 'Exams';
           return <button key={label} className={isActive ? 'active' : ''} title={label} onClick={() => onNavigate(label)}><span className="nav-icon">{icon}</span><b>{label}</b></button>;
         })}
       </nav>
       <div className="sidebar-footer">
-        <button className={currentScreen === 'settings' ? 'settings active' : 'settings'} title="Settings" onClick={() => onNavigate('Settings')}><span>⚙</span><b>Settings</b></button>
+        <button className="settings" title="Settings" onClick={() => onNavigate('Settings')}><span>⚙</span><b>Settings</b></button>
         <button className="school-card" title="Delhi Public School, Bokaro Steel City" onClick={() => onNotice('Delhi Public School · Bokaro Steel City')}><span className="school-seal">D</span><span className="school-copy"><strong>Delhi Public School</strong><small>Bokaro Steel City</small></span></button>
       </div>
     </aside>
-  );
-}
-
-function DashboardScreen({ onNavigate }: { onNavigate: (label: string) => void }) {
-  return (
-    <section className="upload-workspace">
-      <div className="title-block"><h1>Welcome back, <span>Madhur</span></h1><p>Here is an overview of your classroom</p></div>
-      <div className="dashboard-grid">
-        <div className="stat-card">
-          <div>
-            <div className="stat-card-header"><span>Pending Reviews</span><span style={{ fontSize: '20px' }}>📄</span></div>
-            <p className="stat-card-value">3</p>
-          </div>
-          <button className="stat-card-action btn-primary" onClick={() => onNavigate('Exams')}><span>Grade Now</span> <span>→</span></button>
-        </div>
-        <div className="stat-card">
-          <div>
-            <div className="stat-card-header"><span>Total Students</span><span style={{ fontSize: '20px' }}>🎓</span></div>
-            <p className="stat-card-value">42</p>
-          </div>
-          <button className="stat-card-action btn-secondary" onClick={() => onNavigate('My Classroom')}>View Roster</button>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ClassroomScreen() {
-  return (
-    <section className="upload-workspace">
-      <div className="title-block"><h1>My <span>Classroom</span></h1><p>10th Grade Computer Science</p></div>
-      <div className="classroom-container">
-        <div className="roster-table-wrapper">
-          <table className="roster-table">
-            <thead><tr><th>Roll No</th><th>Name</th><th>Latest Exam</th><th>Average</th></tr></thead>
-            <tbody>
-              <tr><td>12</td><td>Aarav Sharma</td><td><span className="status-badge status-success">95%</span></td><td>92%</td></tr>
-              <tr><td>13</td><td>Diya Patel</td><td><span className="status-badge status-success">88%</span></td><td>89%</td></tr>
-              <tr><td>14</td><td>Kabir Singh</td><td><span className="status-badge status-warning">Pending</span></td><td>76%</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SettingsScreen({ onNotice }: { onNotice: (msg: string) => void }) {
-  return (
-    <section className="upload-workspace">
-      <div className="title-block"><h1>Account <span>Settings</span></h1><p>Manage your preferences</p></div>
-      <div className="settings-container">
-        <form className="settings-form" onSubmit={(e) => { e.preventDefault(); onNotice('Settings saved successfully.'); }}>
-          <div className="form-group">
-            <label>Full Name</label>
-            <input type="text" className="form-input" defaultValue="Madhur Khang" />
-          </div>
-          <div className="form-group">
-            <label>School Name</label>
-            <input type="text" className="form-input" defaultValue="Delhi Public School" />
-          </div>
-          <div className="form-group">
-            <label>Theme Preference</label>
-            <select className="form-input form-select">
-              <option>System Default</option>
-              <option>Light Theme</option>
-              <option>Dark Theme (Coming Soon)</option>
-            </select>
-          </div>
-          <button type="submit" className="stat-card-action btn-primary" style={{ marginTop: '30px' }}>Save Settings</button>
-        </form>
-      </div>
-    </section>
   );
 }
 
@@ -424,7 +347,7 @@ function PdfPageCanvas({ file, page, zoom, fallbackUrl }: { file: File; page: nu
         canvas.height = Math.floor(viewport.height);
         await pdfPage.render({ canvas, canvasContext: context, viewport }).promise;
         pdfPage.cleanup();
-        await document.destroy();
+        await task.destroy();
         if (!cancelled) setRendering(false);
       } catch {
         if (!cancelled) setFailed(true);
@@ -565,13 +488,17 @@ async function mapAssessmentWithAi(questionPaper: File, answerSheet: File): Prom
   formData.append('answerSheet', answerSheet);
 
   const response = await fetch('/api/map-assessment', { method: 'POST', body: formData });
-  const payload = await response.json() as AssessmentMappingResponse & { error?: string };
-  if (!response.ok) throw new Error(payload.error || 'AI mapping could not be completed.');
+  const payload = await response.json() as AssessmentMappingResponse & { error?: string; code?: string };
+  if (!response.ok) {
+    const error = new Error(payload.error || 'AI mapping could not be completed.') as Error & { code?: string };
+    error.code = payload.code;
+    throw error;
+  }
   return payload;
 }
 
 export default function Home() {
-  const [screen, setScreen] = useState<Screen>('dashboard');
+  const [screen, setScreen] = useState<Screen>('upload');
   const [questionFile, setQuestionFile] = useState<UploadedFile | null>(null);
   const [answerFile, setAnswerFile] = useState<UploadedFile | null>(null);
   const [progress, setProgress] = useState(0);
@@ -590,22 +517,6 @@ export default function Home() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => setShowIntro(false), 1250);
-    
-    // Load review from Database
-    const hydrateFromDb = async () => {
-      try {
-        const parsed = await loadReviewFromDatabase();
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setQuestions(parsed);
-          const time = new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(new Date());
-          setSavedAt(time);
-        }
-      } catch (err) {
-        console.error('Failed to load review', err);
-      }
-    };
-    hydrateFromDb();
-
     return () => {
       window.clearTimeout(timer);
     };
@@ -692,6 +603,17 @@ export default function Home() {
         setAnswerFile((current) => current ? { ...current, pages: result.answerPageCount } : current);
       } catch (aiError) {
         const reason = aiError instanceof Error ? aiError.message : 'AI mapping was unavailable.';
+        const code = (aiError as { code?: string })?.code;
+        // A missing/unconfigured API key is an environment error, not a successful
+        // extraction. Surface it clearly instead of fabricating placeholder questions.
+        if (code === 'AI_NOT_CONFIGURED') {
+          if (mappingRun.current === runId) {
+            setScreen('upload');
+            setProgress(0);
+            setNotice(reason);
+          }
+          return;
+        }
         if (questionFile.mime === 'application/pdf') {
           try {
             const result = await Promise.race([
@@ -725,16 +647,10 @@ export default function Home() {
     }, remainingDelay);
   };
 
-  const saveReview = async (message = 'Review saved securely.') => {
+  const saveReview = (message = 'Review saved for this session.') => {
     const time = new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(new Date());
     setSavedAt(time);
-    
-    try {
-      await saveReviewToDatabase(questions);
-      setNotice(message);
-    } catch (err) {
-      setNotice('Failed to save review to server.');
-    }
+    setNotice(message);
   };
 
   const completeReview = () => {
@@ -750,23 +666,20 @@ export default function Home() {
   };
 
   const navigate = (label: string) => {
-    if (label === 'Home') setScreen('dashboard');
-    else if (label === 'My Classroom') setScreen('classroom');
-    else if (label === 'Exams') setScreen('upload');
-    else if (label === 'Settings') setScreen('settings');
-    else setNotice(`${label} is outside this assignment flow.`);
+    if (label === 'Exams') {
+      setScreen('upload');
+      return;
+    }
+    setNotice(`${label} is outside this assessment mapping demo.`);
   };
 
   return (
     <>
       {showIntro && <Intro />}
       <main className={`app-shell app-shell--${screen}`}>
-        <Sidebar compact={screen !== 'upload' && screen !== 'dashboard' && screen !== 'classroom'} onNotice={setNotice} onNavigate={navigate} currentScreen={screen} />
+        <Sidebar compact={screen !== 'upload'} onNotice={setNotice} onNavigate={navigate} />
         <div className="app-main">
-          <Header screen={screen} onBack={goBack} onNotice={setNotice} onNavigate={navigate} />
-          {screen === 'dashboard' && <DashboardScreen onNavigate={navigate} />}
-          {screen === 'classroom' && <ClassroomScreen />}
-          {screen === 'settings' && <SettingsScreen onNotice={setNotice} />}
+          <Header screen={screen} onBack={goBack} onNavigate={navigate} />
           {screen === 'upload' && <UploadScreen questionFile={questionFile} answerFile={answerFile} chooseFile={chooseFile} removeFile={removeFile} startMapping={beginMapping} loadDemo={loadDemo} previewFile={setPreviewFile} />}
           {screen === 'extracting' && questionFile && answerFile && <ExtractingScreen progress={progress} questionFile={questionFile} answerFile={answerFile} />}
           {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} extractionMeta={extractionMeta} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}

@@ -88,18 +88,20 @@ async function loadPdfDocument(file: File) {
   pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
   const data = new Uint8Array(await file.arrayBuffer());
-  return pdfjs.getDocument({ data }).promise;
+  return pdfjs.getDocument({ data });
 }
 
 export async function getPdfPageCount(file: File) {
-  const document = await loadPdfDocument(file);
+  const task = await loadPdfDocument(file);
+  const document = await task.promise;
   const pageCount = document.numPages;
-  await document.destroy();
+  await task.destroy();
   return pageCount;
 }
 
 export async function extractQuestionsFromPdf(file: File): Promise<ExtractionResult> {
-  const document = await loadPdfDocument(file);
+  const task = await loadPdfDocument(file);
+  const document = await task.promise;
   const pages: string[] = [];
 
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
@@ -113,7 +115,7 @@ export async function extractQuestionsFromPdf(file: File): Promise<ExtractionRes
   }
 
   const pageCount = document.numPages;
-  await document.destroy();
+  await task.destroy();
   const fullText = pages.join('\n');
   const questions = parseQuestionsFromText(fullText);
 

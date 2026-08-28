@@ -22,6 +22,7 @@ export type MappedQuestion = {
 };
 
 export type AssessmentMappingResponse = {
+  transcript?: string;
   questions: MappedQuestion[];
   answerPageCount: number;
   summary: string;
@@ -42,6 +43,7 @@ type ApiMappedQuestion = {
 };
 
 export type ApiAssessmentMapping = {
+  transcript?: string;
   questions: ApiMappedQuestion[];
   answer_page_count: number;
   summary: string;
@@ -116,8 +118,9 @@ export const questionExtractionSchema = {
 export const assessmentMappingSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['questions', 'answer_page_count', 'summary'],
+  required: ['transcript', 'questions', 'answer_page_count', 'summary'],
   properties: {
+    transcript: { type: 'string', description: 'Complete transcription of the answer sheet text and scratchpad reasoning.' },
     questions: {
       type: 'array',
       items: {
