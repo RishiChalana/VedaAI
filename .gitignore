@@ -32,3 +32,9 @@ yarn-error.log*
 # deployment and generated files
 .vercel
 next-env.d.ts
+
+# local test inputs (sample question papers / answer sheets, Figma refs)
+/test-samples/
+/question paper.png
+/answer sheet pg1.png
+/answer sheet pg2.png

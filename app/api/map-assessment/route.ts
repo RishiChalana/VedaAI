@@ -9,7 +9,9 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const MAX_COMBINED_FILE_SIZE = 50 * 1024 * 1024;
-const DEFAULT_MODEL = 'gemini-2.5-pro';
+// Flash, not pro: pro-tier Gemini is unavailable on the free tier (quota limit:0),
+// so flash is the only model a free-tier key can actually run. See README.
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 function isSupported(file: File) {
   return file.type === 'application/pdf' || ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
@@ -92,7 +94,7 @@ export async function POST(request: Request) {
         'x-goog-api-key': apiKey,
         'Content-Type': 'application/json',
       },
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(45_000),
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: extractInstruction }] },
         contents: [{
@@ -180,7 +182,7 @@ For each question:
         'x-goog-api-key': apiKey,
         'Content-Type': 'application/json',
       },
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(90_000),
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: mapInstruction }] },
         contents: [{

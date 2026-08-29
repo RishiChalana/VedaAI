@@ -26,6 +26,8 @@ import {
 type UploadKind = 'question' | 'answer';
 type Screen = 'upload' | 'extracting' | 'results';
 type MobileTab = 'questions' | 'answer';
+// Extracting-screen phases: real upload (determinate) then server analysis (indeterminate).
+type MappingPhase = 'uploading' | 'processing';
 type HeaderPanel = 'help' | 'notifications' | 'profile' | null;
 type ExtractionMeta = {
   pageCount: number;
@@ -149,7 +151,7 @@ function Header({ screen, onBack, onNavigate }: { screen: Screen; onBack: () => 
           <span className="spark-mini" aria-hidden="true">✦</span>
           <button className="profile-button" aria-label="Open profile" onClick={() => togglePanel('profile')}>
             <span className="avatar">MR</span>
-            <span className="profile-copy desktop-only"><strong>Madhur Khang</strong><small>Teacher</small></span>
+            <span className="profile-copy desktop-only"><strong>Madhur Rastogi</strong><small>Teacher</small></span>
             <span className="desktop-only">⌄</span>
           </button>
           <button className="icon-button mobile-only" aria-label="Open menu" onClick={() => setMobileMenu(!mobileMenu)}>☰</button>
@@ -161,7 +163,7 @@ function Header({ screen, onBack, onNavigate }: { screen: Screen; onBack: () => 
           <button className="popover-close" aria-label="Close" onClick={() => setPanel(null)}>×</button>
           {panel === 'help' && <><span className="popover-icon">✦</span><strong>Assessment mapping help</strong><p>Upload one question paper and one answer sheet. VedaAI maps each answer for teacher review.</p></>}
           {panel === 'notifications' && <><span className="popover-icon">✓</span><strong>You&apos;re all caught up</strong><p>Your assessment workspace has no new notifications.</p></>}
-          {panel === 'profile' && <><span className="popover-icon popover-avatar">MR</span><strong>Madhur Khang</strong><p>Teacher · Delhi Public School</p><button className="popover-action" onClick={() => { setPanel(null); onNavigate('Settings'); }}>View profile</button></>}
+          {panel === 'profile' && <><span className="popover-icon popover-avatar">MR</span><strong>Madhur Rastogi</strong><p>Teacher · Delhi Public School</p><button className="popover-action" onClick={() => { setPanel(null); onNavigate('Settings'); }}>View profile</button></>}
         </div>
       )}
 
@@ -247,16 +249,19 @@ function UploadScreen({ questionFile, answerFile, chooseFile, removeFile, startM
   );
 }
 
-function ExtractingScreen({ progress, questionFile, answerFile }: { progress: number; questionFile: UploadedFile; answerFile: UploadedFile }) {
-  const label = progress < 30 ? 'Reading both documents' : progress < 65 ? 'Detecting question structure' : progress < 90 ? 'Matching handwritten answers' : 'Preparing teacher review';
+function ExtractingScreen({ phase, uploadPct, questionFile, answerFile }: { phase: MappingPhase; uploadPct: number; questionFile: UploadedFile; answerFile: UploadedFile }) {
+  const uploading = phase === 'uploading';
+  // Determinate width only while uploading (real byte progress). During analysis
+  // we have no server-side progress signal, so the bar is honestly indeterminate
+  // rather than a fake percentage creeping toward 100.
   return (
     <section className="extracting-panel" aria-live="polite">
       <div className="extracting-content">
         <div className="extract-spark" aria-hidden="true"><i>✦</i><i>✦</i><i>✦</i><i>✦</i></div>
-        <h1>Extracting...</h1><p>This may take a while</p>
+        <h1>Extracting…</h1><p>This may take a while</p>
         <div className="processing-files"><span>{questionFile.name}</span><i>↔</i><span>{answerFile.name}</span></div>
-        <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-        <small>{label} · {progress}%</small>
+        <div className={`progress-track ${uploading ? '' : 'progress-track--indeterminate'}`}><span style={uploading ? { width: `${uploadPct}%` } : undefined} /></div>
+        <small>{uploading ? `Uploading documents · ${uploadPct}%` : 'Analyzing answers with AI…'}</small>
       </div>
     </section>
   );
@@ -582,10 +587,45 @@ function Intro() {
   return <div className="brand-intro" aria-hidden="true"><div className="intro-mark"><span>V</span><i>✦</i><i>✦</i><i>✦</i></div><strong>VedaAI</strong><small>AI that understands your classroom</small></div>;
 }
 
-async function inspectFile(file: File): Promise<UploadedFile> {
-  if (file.size > MAX_FILE_SIZE) throw new Error('File is larger than 25 MB. Choose a smaller document.');
-  const mime = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : '');
-  if (mime !== 'application/pdf' && !mime.startsWith('image/')) throw new Error('Unsupported file. Upload a PDF, PNG, JPG or WEBP document.');
+// Downscale/recompress a photo before it ever hits the network: phone photos are
+// 2–4 MB, which is slow to send, slow for the model to read, and risks Vercel's
+// ~4.5 MB request-body limit. We cap the longest side at 1600 px and re-encode as
+// JPEG q0.8. SVG and PDF are left untouched. Any failure falls back to the original.
+const MAX_IMAGE_DIMENSION = 1600;
+const IMAGE_QUALITY = 0.8;
+
+async function downscaleImage(file: File): Promise<File> {
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') return file;
+  try {
+    // `from-image` bakes in EXIF orientation so rotated phone photos map correctly.
+    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) { bitmap.close(); return file; }
+    context.fillStyle = '#ffffff'; // flatten any transparency (JPEG has no alpha)
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', IMAGE_QUALITY));
+    if (!blob || blob.size >= file.size) return file; // never inflate an already-small image
+    return new File([blob], file.name, { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
+
+async function inspectFile(rawInput: File): Promise<UploadedFile> {
+  if (rawInput.size > MAX_FILE_SIZE) throw new Error('File is larger than 25 MB. Choose a smaller document.');
+  const inputMime = rawInput.type || (rawInput.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : '');
+  if (inputMime !== 'application/pdf' && !inputMime.startsWith('image/')) throw new Error('Unsupported file. Upload a PDF, PNG, JPG or WEBP document.');
+
+  const file = await downscaleImage(rawInput);
+  const mime = file.type || inputMime;
 
   let pages = 1;
   if (mime === 'application/pdf') {
@@ -598,26 +638,60 @@ async function inspectFile(file: File): Promise<UploadedFile> {
   return { name: file.name, size: `${Math.max(file.size / 1024 / 1024, 0.1).toFixed(1)} MB`, pages, mime, source: 'uploaded', url: URL.createObjectURL(file), rawFile: file };
 }
 
-async function mapAssessmentWithAi(questionPaper: File, answerSheet: File): Promise<AssessmentMappingResponse> {
+type MappingProgress = {
+  // 0–1 fraction of bytes uploaded (real signal from the XHR upload stream).
+  onUploadProgress: (fraction: number) => void;
+  // Fired once the request body is fully sent and the server starts analysing.
+  onUploaded: () => void;
+};
+
+// Uses XMLHttpRequest (not fetch) specifically because it exposes real upload
+// progress events, which drive the genuine "Uploading" phase of the progress bar.
+function mapAssessmentWithAi(questionPaper: File, answerSheet: File, progress: MappingProgress): Promise<AssessmentMappingResponse> {
   const formData = new FormData();
   formData.append('questionPaper', questionPaper);
   formData.append('answerSheet', answerSheet);
 
-  const response = await fetch('/api/map-assessment', { method: 'POST', body: formData });
-  const payload = await response.json() as AssessmentMappingResponse & { error?: string; code?: string };
-  if (!response.ok) {
-    const error = new Error(payload.error || 'AI mapping could not be completed.') as Error & { code?: string };
-    error.code = payload.code;
-    throw error;
-  }
-  return payload;
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/map-assessment');
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) progress.onUploadProgress(event.loaded / event.total);
+    };
+    xhr.upload.onload = () => {
+      progress.onUploadProgress(1);
+      progress.onUploaded();
+    };
+
+    xhr.onload = () => {
+      let payload: AssessmentMappingResponse & { error?: string; code?: string };
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {
+        reject(new Error('The AI service returned an unreadable response.'));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload);
+      } else {
+        const error = new Error(payload.error || 'AI mapping could not be completed.') as Error & { code?: string };
+        error.code = payload.code;
+        reject(error);
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error while contacting the AI service.'));
+
+    xhr.send(formData);
+  });
 }
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>('upload');
   const [questionFile, setQuestionFile] = useState<UploadedFile | null>(null);
   const [answerFile, setAnswerFile] = useState<UploadedFile | null>(null);
-  const [progress, setProgress] = useState(0);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [phase, setPhase] = useState<MappingPhase>('uploading');
   const [selected, setSelected] = useState(2);
   const [showIntro, setShowIntro] = useState(true);
   const [questions, setQuestions] = useState<Question[]>(initialQuestions);
@@ -644,12 +718,6 @@ export default function Home() {
     const timer = window.setTimeout(() => setNotice(null), 2800);
     return () => window.clearTimeout(timer);
   }, [notice]);
-
-  useEffect(() => {
-    if (screen !== 'extracting') return;
-    const timer = window.setInterval(() => setProgress((current) => Math.min(92, current + 9)), 420);
-    return () => window.clearInterval(timer);
-  }, [screen]);
 
   const chooseFile = async (kind: UploadKind, file: File) => {
     try {
@@ -695,7 +763,8 @@ export default function Home() {
     if (!questionFile || !answerFile) return;
     const runId = ++mappingRun.current;
     const startedAt = Date.now();
-    setProgress(8);
+    setUploadPct(0);
+    setPhase(questionFile.source === 'demo' ? 'processing' : 'uploading');
     setScreen('extracting');
     setSavedAt(null);
 
@@ -708,7 +777,10 @@ export default function Home() {
       nextMeta = { pageCount: questionFile.pages, characterCount: 333, mode: 'ai', message: `${sampleQuestions.length} questions and answers matched · average confidence 99%.` };
     } else if (questionFile.rawFile && answerFile.rawFile) {
       try {
-        const result = await mapAssessmentWithAi(questionFile.rawFile, answerFile.rawFile);
+        const result = await mapAssessmentWithAi(questionFile.rawFile, answerFile.rawFile, {
+          onUploadProgress: (fraction) => { if (mappingRun.current === runId) setUploadPct(Math.round(fraction * 100)); },
+          onUploaded: () => { if (mappingRun.current === runId) setPhase('processing'); },
+        });
         nextQuestions = result.questions;
         nextUnmatched = result.unmatchedAnswers;
         const mappedCount = result.questions.filter((question) => question.status === 'mapped').length;
@@ -728,7 +800,7 @@ export default function Home() {
         if (code === 'AI_NOT_CONFIGURED') {
           if (mappingRun.current === runId) {
             setScreen('upload');
-            setProgress(0);
+            setUploadPct(0);
             setNotice(reason);
           }
           return;
@@ -753,17 +825,16 @@ export default function Home() {
       }
     }
 
-    const remainingDelay = Math.max(450, 2600 - (Date.now() - startedAt));
+    // Real work is already done; keep a short floor only so the "processing"
+    // state doesn't flash by (mainly for the instant demo path).
+    const remainingDelay = Math.max(500, 1400 - (Date.now() - startedAt));
     window.setTimeout(() => {
       if (mappingRun.current !== runId) return;
       setQuestions(nextQuestions);
       setUnmatched(nextUnmatched);
       setSelected(nextQuestions.find((question) => question.status === 'mapped')?.id ?? nextQuestions[0]?.id ?? 1);
       setExtractionMeta(nextMeta);
-      setProgress(100);
-      window.setTimeout(() => {
-        if (mappingRun.current === runId) setScreen('results');
-      }, 380);
+      setScreen('results');
     }, remainingDelay);
   };
 
@@ -782,7 +853,8 @@ export default function Home() {
     if (screen === 'upload') { setNotice('You are at the beginning of the assessment flow.'); return; }
     mappingRun.current += 1;
     setScreen('upload');
-    setProgress(0);
+    setUploadPct(0);
+    setPhase('uploading');
   };
 
   const navigate = (label: string) => {
@@ -801,7 +873,7 @@ export default function Home() {
         <div className="app-main">
           <Header screen={screen} onBack={goBack} onNavigate={navigate} />
           {screen === 'upload' && <UploadScreen questionFile={questionFile} answerFile={answerFile} chooseFile={chooseFile} removeFile={removeFile} startMapping={beginMapping} loadDemo={loadDemo} previewFile={setPreviewFile} />}
-          {screen === 'extracting' && questionFile && answerFile && <ExtractingScreen progress={progress} questionFile={questionFile} answerFile={answerFile} />}
+          {screen === 'extracting' && questionFile && answerFile && <ExtractingScreen phase={phase} uploadPct={uploadPct} questionFile={questionFile} answerFile={answerFile} />}
           {screen === 'results' && answerFile && <ResultsScreen answerFile={answerFile} questions={questions} unmatched={unmatched} extractionMeta={extractionMeta} selected={selected} savedAt={savedAt} onSelected={setSelected} onUpdate={(id, patch) => setQuestions((current) => current.map((question) => question.id === id ? { ...question, ...patch } : question))} onSave={() => saveReview()} onComplete={() => setShowComplete(true)} />}
         </div>
       </main>
